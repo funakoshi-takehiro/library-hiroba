@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ui-hiroba"
+dynamic = ["version"]
+description = "Colab と PyHiroba の両方で動く、サーバー不要の教育向け UI 表示ライブラリ"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Takehiro Funakoshi" }]
+keywords = ["jupyter", "colab", "education", "ui", "notebook", "pyodide"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Education",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Framework :: Jupyter",
+  "Topic :: Education",
+]
+
+[project.urls]
+Homepage = "https://github.com/funakoshi-takehiro/ui-hiroba"
+Issues = "https://github.com/funakoshi-takehiro/ui-hiroba/issues"
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff", "build"]
+gallery = ["playwright"]
+
+[tool.hatch.version]
+path = "src/ui_hiroba/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ui_hiroba"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+extend-select = ["I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
