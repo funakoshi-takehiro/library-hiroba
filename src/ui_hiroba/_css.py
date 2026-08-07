@@ -235,7 +235,8 @@ COMPONENT_CSS = {
 }
 .hui-col { flex: 1 1 0; min-width: 200px; }
 .hui-col > :first-child { margin-top: 0; }
-.hui-col > :last-child { margin-bottom: 0; }""",
+.hui-col > :last-child { margin-bottom: 0; }
+.hui-col > .hui-stat { width: 100%; }""",
     "badge": """\
 .hui-badge {
   display: inline-block;
@@ -271,5 +272,6 @@ COMPONENT_CSS = {
 .hui-table tbody tr:nth-child(even) { background: var(--hui-bg-softer); }""",
     "stack": """\
 .hui-stack { display: flex; flex-direction: column; margin: 8px 0; }
-.hui-stack > * { margin: 0; }""",
+.hui-stack > * { margin: 0; }
+.hui-stack > .hui-badge, .hui-stack > .hui-stat { align-self: flex-start; }""",
 }

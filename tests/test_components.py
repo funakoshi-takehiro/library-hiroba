@@ -95,7 +95,7 @@ def test_stat_unit_and_icon():
 
 def test_columns_dedupes_child_css():
     rendered = ui.columns(ui.stat("a", 1), ui.stat("b", 2), ui.stat("c", 3))._repr_html_()
-    assert rendered.count(".hui-stat {") == 1
+    assert rendered.count(".hui-stat-value") == 1  # stat の CSS 定義は1回だけ
     assert rendered.count('class="hui-col"') == 3
 
 
