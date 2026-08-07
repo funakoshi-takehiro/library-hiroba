@@ -146,6 +146,52 @@ def test_table_empty_raises():
         ui.table([])
 
 
+# --- html + css -------------------------------------------------------------
+
+
+def test_html_css_is_scoped_by_default():
+    w = ui.html('<div class="x">a</div>', css=".x { color: red; }")
+    rendered = w._repr_html_()
+    scope = w.scope_class
+    assert scope is not None and scope.startswith("hui-raw-")
+    assert f'class="hui-raw {scope}"' in rendered  # 中身のラッパーにスコープクラス
+    assert f".{scope} {{" in rendered  # CSS はスコープクラスの中にネストされる
+    assert ".x { color: red; }" in rendered
+
+
+def test_html_css_scope_is_unique_per_instance():
+    a = ui.html("x", css="b { color: red }")
+    b = ui.html("x", css="b { color: red }")
+    assert a.scope_class != b.scope_class
+
+
+def test_html_css_unscoped_is_emitted_verbatim():
+    w = ui.html("<p>a</p>", css="p { margin: 0 }", scoped=False)
+    rendered = w._repr_html_()
+    assert w.scope_class is None
+    assert "p { margin: 0 }" in rendered
+    assert 'class="hui-raw"' in rendered
+
+
+def test_html_without_css_has_no_scope_class():
+    w = ui.html("<b>x</b>")
+    assert w.scope_class is None
+    assert 'class="hui-raw"' in w.fragment()
+
+
+def test_html_css_is_collected_through_containers():
+    child = ui.html("<i>x</i>", css="i { color: red }")
+    rendered = ui.stack(ui.card("t"), child)._repr_html_()
+    assert "i { color: red }" in rendered
+
+
+def test_html_css_duplicate_unscoped_blocks_are_deduped():
+    a = ui.html("x", css=".g { color: red }", scoped=False)
+    b = ui.html("y", css=".g { color: red }", scoped=False)
+    rendered = ui.stack(a, b)._repr_html_()
+    assert rendered.count(".g { color: red }") == 1
+
+
 # --- show -------------------------------------------------------------------
 
 

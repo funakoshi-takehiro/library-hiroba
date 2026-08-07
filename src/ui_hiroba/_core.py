@@ -46,10 +46,21 @@ class Widget:
     def _iter_css_keys(self) -> list[str]:
         return list(self.css_keys)
 
+    def extra_css(self) -> str:
+        """このインスタンス固有の追加 CSS（``ui.html`` の ``css`` 引数など）。"""
+        return ""
+
+    def _iter_extra_css(self) -> list[str]:
+        extra = self.extra_css()
+        return [extra] if extra else []
+
     def _style_block(self) -> str:
         needed = set(self._iter_css_keys())
         # COMPONENT_CSS の定義順を保って必要な分だけ連結（重複なし）
         parts = [BASE_CSS] + [css for key, css in COMPONENT_CSS.items() if key in needed]
+        for block in self._iter_extra_css():
+            if block not in parts:
+                parts.append(block)
         return "<style>\n" + "\n".join(parts) + "\n</style>"
 
     def _repr_html_(self) -> str:
@@ -91,6 +102,12 @@ class Container(Widget):
         for child in self.children:
             keys.extend(child._iter_css_keys())
         return keys
+
+    def _iter_extra_css(self) -> list[str]:
+        blocks = super()._iter_extra_css()
+        for child in self.children:
+            blocks.extend(child._iter_extra_css())
+        return blocks
 
 
 class Stack(Container):

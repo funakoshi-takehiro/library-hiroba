@@ -98,7 +98,26 @@ def demo_widgets() -> list[tuple[str, ui.Widget]]:
                 caption="漢字テストの結果",
             ),
         ),
-        ("html（自由記述）", ui.html("<p>エスケープなしで <b>自由な HTML</b> も書ける（明示的な逃げ道）</p>")),
+        (
+            "html + css（自由記述・CSS は既定で自動スコープ）",
+            ui.stack(
+                ui.html(
+                    '<div class="fukidashi">こんにちは！<br>いっしょに <b>Python</b> を勉強しよう 🐍</div>',
+                    css="""
+.fukidashi {
+  display: inline-block;
+  border: 2px solid #e91e63;
+  border-radius: 16px;
+  padding: 10px 16px;
+  background: rgba(233, 30, 99, 0.08);
+  font-weight: 600;
+}
+b { color: #e91e63; }
+""",
+                ),
+                ui.html("<p>となりの部品の <b>太字</b> はスコープ外なので影響を受けない</p>"),
+            ),
+        ),
         (
             "組み合わせ（columns の中に card）",
             ui.columns(

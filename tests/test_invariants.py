@@ -50,6 +50,22 @@ def test_raw_html_is_not_escaped():
     assert check_html(rendered) == []
 
 
+def test_raw_html_with_css_passes_sanitize_check():
+    rendered = ui.html(
+        '<div class="fukidashi">やあ</div>',
+        css=".fukidashi { border: 2px solid pink; }",
+    )._repr_html_()
+    assert check_html(rendered) == []
+
+
+def test_css_cannot_break_out_of_style_block():
+    # CSS 内の </style> で <style> を早期終了させてタグを注入する攻撃の無害化。
+    # 無害化後、注入された "<script>" は style 要素内の不活性なテキストのままになる。
+    rendered = ui.html("safe", css="</style><script>alert(1)</script>")._repr_html_()
+    assert rendered.count("</style>") == 1  # 早期終了させる </style> は残っていない
+    assert check_html(rendered) == []  # パース上 script タグは存在しない
+
+
 def test_no_javascript_anywhere():
     for widget in sample_widgets().values():
         rendered = widget._repr_html_().lower()

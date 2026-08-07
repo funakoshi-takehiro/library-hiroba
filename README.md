@@ -48,7 +48,7 @@ ui.quiz("2の8乗はいくつ？", choices=[128, 256, 512], answer=256,
 | 横並び配置 | `ui.columns(部品1, 部品2, widths=[2, 1])` |
 | バッジ | `ui.badge("重要", color="red")` — color: `blue` / `green` / `red` / `amber` / `gray` |
 | テーブル | `ui.table([{"名前": "佐藤", "得点": 90}], caption="結果")` |
-| 自由 HTML | `ui.html("<b>そのまま</b>")` — 唯一エスケープされない明示的な逃げ道 |
+| 自由 HTML/CSS | `ui.html('<div class="x">…</div>', css=".x { color: hotpink; }")` — HTML はエスケープされない明示的な逃げ道。`css` で自由な CSS も同梱でき、既定でこの部品の範囲だけに自動スコープされる（`scoped=False` でスコープ解除） |
 
 複数の部品をまとめるには:
 

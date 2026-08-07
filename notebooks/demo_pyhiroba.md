@@ -80,6 +80,26 @@ ui.show(
 )
 ```
 
+## セル10: 自由な HTML + CSS
+
+```python
+# HTML はエスケープされない逃げ道。css は既定で「この部品の中」だけに効く
+# （scoped=False にするとページ全体に効くので注意）
+ui.html("""
+<div class="fukidashi">こんにちは！<br>いっしょに <b>Python</b> を勉強しよう 🐍</div>
+""", css="""
+.fukidashi {
+  display: inline-block;
+  border: 2px solid #e91e63;
+  border-radius: 16px;
+  padding: 10px 16px;
+  background: rgba(233, 30, 99, 0.08);
+  font-weight: 600;
+}
+b { color: #e91e63; }
+""")
+```
+
 ## 確認ポイント
 
 - すべての部品が表示される（サニタイザに何も削られない）

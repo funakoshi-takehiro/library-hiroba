@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from typing import Union
 
@@ -299,14 +300,31 @@ class Table(Widget):
         )
 
 
+# CSS 文字列中の "</style" で <style> ブロックが早期終了しないよう無害化する
+_STYLE_CLOSE_RE = re.compile(r"</style", re.IGNORECASE)
+
+
 class RawHtml(Widget):
     css_keys = ()
 
-    def __init__(self, raw: object):
+    def __init__(self, raw: object, css: str | None = None, scoped: bool = True):
         self.raw = str(raw)
+        self.css = None if css is None else _STYLE_CLOSE_RE.sub(lambda _: "<\\/style", str(css))
+        # scoped の場合はインスタンスごとに一意なクラスで CSS の効く範囲を限定する
+        # （PyHiroba では全セルが 1 document を共有するため、ページや他セルを汚さない）
+        self.scope_class = unique_name("hui-raw") if (self.css is not None and scoped) else None
+
+    def extra_css(self) -> str:
+        if self.css is None:
+            return ""
+        if self.scope_class is not None:
+            # CSS ネスト（モダンブラウザ標準）でユーザー CSS 全体をスコープする
+            return f".{self.scope_class} {{\n{self.css}\n}}"
+        return self.css
 
     def fragment(self) -> str:
-        return f'<div class="hui-raw">{self.raw}</div>'
+        cls = "hui-raw" if self.scope_class is None else f"hui-raw {self.scope_class}"
+        return f'<div class="{cls}">{self.raw}</div>'
 
 
 # ---------------------------------------------------------------------------
@@ -402,14 +420,24 @@ def table(data, headers=None, caption=None) -> Table:
     return Table(data, headers=headers, caption=caption)
 
 
-def html(raw) -> RawHtml:
-    """HTML をエスケープせずそのまま表示する（明示的な逃げ道）。
+def html(raw, css=None, scoped=True) -> RawHtml:
+    """HTML をエスケープせずそのまま表示する（明示的な逃げ道）。CSS も書ける。
+
+    >>> ui.html('<div class="fukidashi">こんにちは！</div>',
+    ...         css=".fukidashi { border: 2px solid pink; border-radius: 16px; }")
+
+    - ``css``: この部品と一緒に出力される自由な CSS。
+    - ``scoped=True``（既定）: CSS はこの部品の範囲だけに効く（インスタンスごとの
+      一意なクラスと CSS ネストで自動スコープ）。ページや他のセルを汚さない。
+    - ``scoped=False``: CSS をそのまま出力する。Colab では出力 iframe 内、
+      PyHiroba では**ページ全体**に効く点に注意。``@keyframes`` などトップレベル
+      専用の @ルールを使う場合はこちらを指定する。
 
     渡した内容がそのまま出力に含まれるため、信頼できる内容にだけ使うこと。
     PyHiroba 上では表示前に本体側のサニタイザ（DOMPurify）が適用されるため、
     script などはそこで除去される。
     """
-    return RawHtml(raw)
+    return RawHtml(raw, css=css, scoped=scoped)
 
 
 def stack(*items, gap="12px") -> Stack:
