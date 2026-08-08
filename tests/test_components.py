@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import re
+
 import pytest
 
 import ui_hiroba as ui
 
 
-def test_version():
-    assert ui.__version__ == "0.1.0"
+def test_version_is_well_formed():
+    # 具体的な番号は書かない（リリースのたびにテストを直す必要がなくなる）。
+    # 公開ワークフローが、この値とタグの一致を別途検証している。
+    assert re.fullmatch(r"\d+\.\d+\.\d+", ui.__version__), ui.__version__
 
 
 # --- card / alert -----------------------------------------------------------
