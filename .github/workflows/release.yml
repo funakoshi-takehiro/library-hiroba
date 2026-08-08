@@ -31,13 +31,12 @@ jobs:
       # 壊れたものを公開しないよう、リリース時にもテストを通す
       - name: Test
         run: |
-          python -m pip install -e . pytest ruff
+          python -m pip install -e ".[dev]"
           ruff check src tests tools
           pytest -q
 
       - name: Build sdist and wheel
         run: |
-          python -m pip install build twine
           python -m build
           twine check dist/*
 

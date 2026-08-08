@@ -30,6 +30,7 @@ __version__ = "0.1.0"
 
 __all__ = [
     "Widget",
+    "__version__",
     "alert",
     "badge",
     "card",
@@ -42,5 +43,4 @@ __all__ = [
     "stack",
     "stat",
     "table",
-    "__version__",
 ]

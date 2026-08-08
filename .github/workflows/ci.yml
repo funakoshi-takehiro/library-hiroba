@@ -16,8 +16,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      # 開発用の依存は pyproject の dev extra に集約し、手元と CI で同じものを使う
       - name: Install
-        run: python -m pip install -e . pytest ruff
+        run: python -m pip install -e ".[dev]"
       - name: Lint
         run: ruff check src tests tools
       - name: Test

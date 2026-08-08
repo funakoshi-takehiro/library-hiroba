@@ -44,19 +44,19 @@ def fetch_local_font_css() -> bool:
     fonts_dir = OUT / "fonts"
     try:
         req = urllib.request.Request(GOOGLE_FONTS_CSS, headers={"User-Agent": UA_WOFF2})
-        with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 (固定URL)
+        with urllib.request.urlopen(req, timeout=30) as resp:
             css = resp.read().decode("utf-8")
         fonts_dir.mkdir(parents=True, exist_ok=True)
         for i, url in enumerate(dict.fromkeys(re.findall(r"url\((https://[^)]+\.woff2)\)", css))):
             name = f"zenkaku-{i}.woff2"
-            with urllib.request.urlopen(  # noqa: S310 (取得済み CSS 内の URL)
+            with urllib.request.urlopen(
                 urllib.request.Request(url, headers={"User-Agent": UA_WOFF2}), timeout=30
             ) as fr:
                 (fonts_dir / name).write_bytes(fr.read())
             css = css.replace(url, f"fonts/{name}")
         (OUT / "fonts.css").write_text(css, encoding="utf-8")
         return True
-    except Exception as exc:  # ネットワークが無い環境では system-ui で撮る
+    except (OSError, ValueError) as exc:  # ネットワークが無い環境では system-ui で撮る
         print(f"  (フォント取得をスキップ: {exc})")
         return False
 
@@ -220,6 +220,7 @@ def build_pages() -> None:
 
 
 def take_screenshots(font_ready: bool) -> None:
+    from playwright.sync_api import Error as PlaywrightError
     from playwright.sync_api import sync_playwright
 
     shots = [
@@ -233,7 +234,7 @@ def take_screenshots(font_ready: bool) -> None:
     with sync_playwright() as p:
         try:
             browser = p.chromium.launch()
-        except Exception:
+        except PlaywrightError:
             browser = p.chromium.launch(executable_path="/opt/pw-browsers/chromium")
         for file, scheme, out_name in shots:
             tab = browser.new_page(viewport={"width": 880, "height": 1000}, color_scheme=scheme)

@@ -44,10 +44,10 @@ def test_notebook_cells_run_and_render_safely(notebook):
         last_expr = None
         if tree.body and isinstance(tree.body[-1], ast.Expr):
             last_expr = ast.Expression(tree.body.pop().value)
-        exec(compile(tree, cell_id, "exec"), env)  # noqa: S102 (リポジトリ内の自作ノートブック)
+        exec(compile(tree, cell_id, "exec"), env)
         if last_expr is None:
             continue
-        value = eval(compile(last_expr, cell_id, "eval"), env)  # noqa: S307
+        value = eval(compile(last_expr, cell_id, "eval"), env)
         # 部品を表示するセルだけ検証する（ui.__version__ のような確認セルは対象外。
         # ui.show() は Colab では None を返す）
         if isinstance(value, ui.Widget):

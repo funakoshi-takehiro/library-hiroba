@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from typing import Union
+from typing import ClassVar, Union
 
 from ._core import (
     Container,
@@ -54,7 +54,12 @@ class Alert(Widget):
     css_keys = ("alert",)
 
     # PyHiroba に合わせ絵文字は使わず、CSS の円形マーク内に文字記号を置く
-    MARKS = {"info": "i", "success": "✓", "warning": "!", "danger": "×"}
+    MARKS: ClassVar[dict[str, str]] = {
+        "info": "i",
+        "success": "✓",
+        "warning": "!",
+        "danger": "×",
+    }
 
     def __init__(self, message: object, kind: str = "info", title: object = None):
         if kind not in self.MARKS:

@@ -6,7 +6,7 @@ from pathlib import Path
 # pip install なしでも src レイアウトのパッケージを import できるようにする
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-import ui_hiroba as ui  # noqa: E402
+import ui_hiroba as ui
 
 
 def sample_widgets(text: str = "サンプル") -> dict[str, ui.Widget]:

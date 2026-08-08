@@ -37,7 +37,7 @@ Issues = "https://github.com/funakoshi-takehiro/ui-hiroba/issues"
 Changelog = "https://github.com/funakoshi-takehiro/ui-hiroba/releases"
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff", "build"]
+dev = ["pytest", "ruff>=0.16", "build", "twine", "nbformat"]
 gallery = ["playwright"]
 
 [tool.hatch.version]
@@ -51,7 +51,12 @@ line-length = 100
 target-version = "py39"
 
 [tool.ruff.lint]
-extend-select = ["I", "UP", "B"]
+# ruff は版が上がると既定の規則セットが変わるため、使う規則を明示しておく
+# （明示しないと、こちらのコードを変えていないのに CI だけ落ちることがある）
+select = ["E4", "E7", "E9", "F", "I", "UP", "B", "BLE", "RUF"]
+# RUF001-003 は全角括弧などを「紛らわしい文字」として警告するが、
+# このプロジェクトは日本語で書くため全角の使用は意図的
+ignore = ["RUF001", "RUF002", "RUF003"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
