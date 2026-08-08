@@ -38,17 +38,17 @@ _LIGHT_TOKENS = """\
   --hui-bg-2: #f3f1ec;
   --hui-line: #e7e5e0;
   --hui-accent: #028DAE;
-  --hui-accent-ink: #017a97;
-  --hui-accent-soft: rgba(2, 141, 174, 0.10);
+  --hui-accent-ink: #01738e;
+  --hui-accent-soft: #e6f4f7;
   --hui-ok: #27ae60;
   --hui-ok-ink: #187f45;
-  --hui-ok-soft: rgba(39, 174, 96, 0.10);
+  --hui-ok-soft: #e9f7ef;
   --hui-warn: #f59e0b;
   --hui-warn-ink: #96610b;
-  --hui-warn-soft: rgba(245, 158, 11, 0.12);
+  --hui-warn-soft: #fef3e2;
   --hui-bad: #e74c3c;
   --hui-bad-ink: #c0392b;
-  --hui-bad-soft: rgba(231, 76, 60, 0.10);
+  --hui-bad-soft: #fdedec;
   --hui-on-accent: #ffffff;
   --hui-shadow: 0 1px 0 rgba(16, 20, 24, 0.04), 0 4px 12px -6px rgba(16, 20, 24, 0.08);"""
 
@@ -62,24 +62,27 @@ _DARK_TOKENS = """\
   --hui-line: #2c333b;
   --hui-accent: #35aecb;
   --hui-accent-ink: #35aecb;
-  --hui-accent-soft: rgba(53, 174, 203, 0.16);
+  --hui-accent-soft: #1d353f;
   --hui-ok: #4cc272;
   --hui-ok-ink: #58c97a;
-  --hui-ok-soft: rgba(76, 194, 114, 0.14);
+  --hui-ok-soft: #20352f;
   --hui-warn: #f5b04b;
   --hui-warn-ink: #f5b04b;
-  --hui-warn-soft: rgba(245, 176, 75, 0.14);
+  --hui-warn-soft: #383229;
   --hui-bad: #f0705f;
   --hui-bad-ink: #f0705f;
-  --hui-bad-soft: rgba(240, 112, 95, 0.14);
+  --hui-bad-soft: #37292c;
   --hui-on-accent: #0e1418;
   --hui-shadow: 0 1px 0 rgba(0, 0, 0, 0.35), 0 4px 12px -6px rgba(0, 0, 0, 0.45);"""
 
-# テーマの重ね順（後勝ち + 詳細度）:
-#   1. .hui                      … ライト基準
-#   2. @media dark の .hui       … OS がダーク（Colab iframe はこれしか手がかりがない）
-#   3. [data-theme="dark"] .hui  … PyHiroba の手動ダーク（<html> に付く）
-#   4. [data-theme="light"] .hui … 明示ライトが 2 に勝つための再宣言
+# テーマは2層だけ:
+#   1. .hui                      … 常にライト（既定）
+#   2. [data-theme="dark"] .hui  … PyHiroba がダークのときだけダーク
+#
+# OS の配色設定（prefers-color-scheme）は意図的に見ない。PyHiroba 本体も
+# 初期状態は常にライトで、ダークは利用者が切り替えたときだけ <html> に
+# data-theme="dark" が付く（js/theme.js）。OS 設定を見てしまうと、
+# ライト表示のページの中で部品だけが黒くなる食い違いが起きる。
 BASE_CSS = f"""\
 {FONT_IMPORT}
 .hui, .hui *, .hui *::before, .hui *::after {{ box-sizing: border-box; }}
@@ -94,16 +97,8 @@ BASE_CSS = f"""\
   --hui-radius-sm: 8px;
 {_LIGHT_TOKENS}
 }}
-@media (prefers-color-scheme: dark) {{
-  .hui {{
-{_DARK_TOKENS}
-  }}
-}}
 [data-theme="dark"] .hui {{
 {_DARK_TOKENS}
-}}
-[data-theme="light"] .hui {{
-{_LIGHT_TOKENS}
 }}
 .hui a {{ color: var(--hui-accent-ink); }}
 .hui b, .hui strong {{ font-weight: 700; }}"""
@@ -261,7 +256,7 @@ COMPONENT_CSS = {
   font-size: 0.92em;
   margin-bottom: 5px;
 }
-.hui-progress-num { font-weight: 700; color: var(--hui-accent-ink); }
+.hui-progress-num { font-weight: 700; }
 .hui-progress-track {
   height: 12px;
   border-radius: 999px;
@@ -360,8 +355,10 @@ COMPONENT_CSS = {
   font-family: inherit;
   font-size: 0.95em;
   line-height: 1.7;
-  color: var(--hui-ink);
+  background: var(--hui-paper);
 }
+/* caption は table の外側に置かれ背景が敷かれないため、色は指定せず
+   ホストの文字色を継承させる（暗いページでも読める） */
 .hui .hui-table caption {
   caption-side: top;
   text-align: left;
@@ -370,6 +367,7 @@ COMPONENT_CSS = {
   padding: 0 0 8px;
 }
 .hui .hui-table th, .hui .hui-table td {
+  color: var(--hui-ink);
   border: 1px solid var(--hui-line);
   padding: 7px 14px;
   text-align: left;

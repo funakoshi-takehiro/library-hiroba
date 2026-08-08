@@ -38,10 +38,10 @@ def test_style_and_root_are_present(name):
     rendered = sample_widgets()[name]._repr_html_()
     assert rendered.startswith("<style>")
     assert '<div class="hui">' in rendered
-    # テーマ4層（ライト基準・OSダーク・data-theme=dark・data-theme=light）が揃っている
-    assert "@media (prefers-color-scheme: dark)" in rendered
+    # 既定はライト、ダークは data-theme="dark" のときだけ
     assert '[data-theme="dark"] .hui' in rendered
-    assert '[data-theme="light"] .hui' in rendered
+    # OS の配色設定は見ない（ライトのページで部品だけ黒くなるのを防ぐ）
+    assert "prefers-color-scheme" not in rendered
 
 
 def test_raw_html_is_not_escaped():

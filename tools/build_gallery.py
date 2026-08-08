@@ -203,8 +203,10 @@ PAGES = {
         "background: #151a20; color: #e8eaed;",
         html_attr=' data-theme="dark"',
     ),
+    # data-theme が付いていない暗いホスト。スクショ時に OS ダークをエミュレートし、
+    # 「OS の設定につられて部品が黒くならない」ことを確かめるための回帰チェック。
     "gallery-dark-media.html": page(
-        "dark（OS ダーク相当・prefers-color-scheme）",
+        "OS ダークでもライトのまま（data-theme なし）",
         "background: #1e1e1e; color: #d4d4d4;",
     ),
 }
