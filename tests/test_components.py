@@ -13,8 +13,8 @@ def test_version():
 
 
 def test_card_is_deterministic():
-    a = ui.card("題", "本文", icon="🎯", footer="脚注")._repr_html_()
-    b = ui.card("題", "本文", icon="🎯", footer="脚注")._repr_html_()
+    a = ui.card("題", "本文", icon="[1]", footer="脚注")._repr_html_()
+    b = ui.card("題", "本文", icon="[1]", footer="脚注")._repr_html_()
     assert a == b
 
 
@@ -27,6 +27,52 @@ def test_alert_kinds_and_validation():
     assert "hui-alert-warning" not in ui.alert("m").fragment()
     with pytest.raises(ValueError):
         ui.alert("m", kind="fatal")
+
+
+def test_alert_marks_are_text_glyphs_not_emoji():
+    marks = {"info": "i", "success": "✓", "warning": "!", "danger": "×"}
+    for kind, mark in marks.items():
+        markup = ui.alert("m", kind=kind).fragment()
+        assert f'<span class="hui-alert-icon" aria-hidden="true">{mark}</span>' in markup
+
+
+# --- PyHiroba とのデザイン統一 ---------------------------------------------
+
+# 部品の既定出力に含めない絵文字（PyHiroba は絵文字を使わない方針）
+_EMOJI_SAMPLE = "🎯📈🔥⏱🐍✅⚠️ℹ️🚨👋"
+
+
+def test_no_emoji_in_default_output():
+    widgets = [
+        ui.card("題", "本文", footer="脚注"),
+        *[ui.alert("m", kind=k) for k in ("info", "success", "warning", "danger")],
+        ui.quiz("q?", ["a", "b"], "a", explanation="解説"),
+        ui.reveal("答え"),
+        ui.progress(5, max=10, label="進捗"),
+        ui.stat("正答率", 85, unit="%"),
+        ui.badge("重要", color="red"),
+        ui.table([{"名前": "佐藤", "得点": 90}]),
+    ]
+    for widget in widgets:
+        rendered = widget._repr_html_()
+        for char in _EMOJI_SAMPLE:
+            assert char not in rendered, f"{type(widget).__name__} に絵文字 {char} がある"
+
+
+def test_pyhiroba_design_tokens_and_font():
+    rendered = ui.card("題")._repr_html_()
+    assert "Zen Kaku Gothic New" in rendered  # PyHiroba と同じ書体
+    assert "fonts.googleapis.com" in rendered  # 未読込環境向けの @import（失敗時は system-ui）
+    assert "#028DAE" in rendered  # ライトのブランドティール
+    assert "#35aecb" in rendered  # ダークのブランドティール
+    assert 'font-feature-settings: "palt"' in rendered
+
+
+def test_table_css_outranks_pyhiroba_output_html_styles():
+    # PyHiroba の .output-html table th（0,1,1）に負けないよう .hui を前置している
+    rendered = ui.table([[1]], headers=["x"])._repr_html_()
+    assert ".hui .hui-table th" in rendered
+    assert "\n.hui-table th" not in rendered
 
 
 # --- quiz -------------------------------------------------------------------
@@ -86,8 +132,8 @@ def test_progress_hide_value():
 
 
 def test_stat_unit_and_icon():
-    rendered = ui.stat("正答率", 85, unit="%", icon="📈")._repr_html_()
-    assert "hui-stat-unit" in rendered and "📈" in rendered
+    rendered = ui.stat("正答率", 85, unit="%", icon="*")._repr_html_()
+    assert "hui-stat-unit" in rendered and "*" in rendered
 
 
 # --- columns / stack --------------------------------------------------------

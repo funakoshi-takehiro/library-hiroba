@@ -16,7 +16,7 @@ def sample_widgets(text: str = "サンプル") -> dict[str, ui.Widget]:
     """
     t = text
     return {
-        "card": ui.card(t, t + "\n2行目", icon="🎯", footer=t),
+        "card": ui.card(t, t + "\n2行目", icon="[1]", footer=t),
         "alert_info": ui.alert(t),
         "alert_success": ui.alert(t, kind="success", title=t),
         "alert_warning": ui.alert(t, kind="warning"),
@@ -25,7 +25,7 @@ def sample_widgets(text: str = "サンプル") -> dict[str, ui.Widget]:
         "quiz_no_explanation": ui.quiz(t + "?", [t + "1", t + "2"], t + "1"),
         "reveal": ui.reveal(t, summary=t),
         "progress": ui.progress(7, max=10, label=t),
-        "stat": ui.stat(t, 85, unit="%", icon="📈"),
+        "stat": ui.stat(t, 85, unit="%", icon="*"),
         "columns": ui.columns(ui.stat(t, 1), ui.stat(t + "2", 2), widths=[2, 1]),
         "badge": ui.badge(t, color="amber"),
         "table_dicts": ui.table([{t + "列1": t, t + "列2": 1}, {t + "列1": t, t + "列2": 2}]),

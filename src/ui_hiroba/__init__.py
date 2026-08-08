@@ -4,7 +4,7 @@
 
     import ui_hiroba as ui
 
-    ui.card("今日の目標", "for文を使って、九九の表を作ってみよう！", icon="🎯")
+    ui.card("今日の目標", "for文を使って、九九の表を作ってみよう！")
 
 仕組み: 各部品は ``_repr_html_()`` で自己完結な HTML/CSS を返す。
 JavaScript もサーバーも使わないため、ブラウザ内完結の PyHiroba でも

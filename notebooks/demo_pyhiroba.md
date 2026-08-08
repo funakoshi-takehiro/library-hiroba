@@ -12,13 +12,13 @@ PyHiroba のノートブックに、以下のコードブロックを1つずつ�
 ```python
 import ui_hiroba as ui
 
-ui.card("ui-hiroba へようこそ", "このカードが表示されたら準備OK！", icon="👋")
+ui.card("ui-hiroba へようこそ", "このカードが表示されたら準備OK！")
 ```
 
 ## セル2: 説明カード
 
 ```python
-ui.card("今日の目標", "for文を使って、九九の表を作ってみよう！", icon="🎯",
+ui.card("今日の目標", "for文を使って、九九の表を作ってみよう！",
         footer="ヒント: range(1, 10) を2回使うよ")
 ```
 
@@ -51,9 +51,9 @@ ui.progress(7, max=10, label="練習問題の進み具合")
 
 ```python
 ui.columns(
-    ui.stat("正答率", 85, unit="%", icon="📈"),
-    ui.stat("れんぞく正解", 4, unit="問", icon="🔥"),
-    ui.stat("学習時間", 25, unit="分", icon="⏱"),
+    ui.stat("正答率", 85, unit="%"),
+    ui.stat("れんぞく正解", 4, unit="問"),
+    ui.stat("学習時間", 25, unit="分"),
 )
 ```
 
@@ -86,17 +86,17 @@ ui.show(
 # HTML はエスケープされない逃げ道。css は既定で「この部品の中」だけに効く
 # （scoped=False にするとページ全体に効くので注意）
 ui.html("""
-<div class="fukidashi">こんにちは！<br>いっしょに <b>Python</b> を勉強しよう 🐍</div>
+<div class="fukidashi">こんにちは！<br>いっしょに <b>Python</b> を勉強しよう</div>
 """, css="""
 .fukidashi {
   display: inline-block;
-  border: 2px solid #e91e63;
-  border-radius: 16px;
+  border: 2px solid var(--hui-accent);
+  border-radius: 14px;
   padding: 10px 16px;
-  background: rgba(233, 30, 99, 0.08);
-  font-weight: 600;
+  background: var(--hui-accent-soft);
+  font-weight: 700;
 }
-b { color: #e91e63; }
+b { color: var(--hui-accent-ink); }
 """)
 ```
 

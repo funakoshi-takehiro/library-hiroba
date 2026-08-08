@@ -53,12 +53,13 @@ class Card(Widget):
 class Alert(Widget):
     css_keys = ("alert",)
 
-    ICONS = {"info": "ℹ️", "success": "✅", "warning": "⚠️", "danger": "🚨"}
+    # PyHiroba に合わせ絵文字は使わず、CSS の円形マーク内に文字記号を置く
+    MARKS = {"info": "i", "success": "✓", "warning": "!", "danger": "×"}
 
     def __init__(self, message: object, kind: str = "info", title: object = None):
-        if kind not in self.ICONS:
+        if kind not in self.MARKS:
             raise ValueError(
-                f"kind は {sorted(self.ICONS)} のいずれかにしてください（指定値: {kind!r}）"
+                f"kind は {sorted(self.MARKS)} のいずれかにしてください（指定値: {kind!r}）"
             )
         self.message = message
         self.kind = kind
@@ -69,7 +70,7 @@ class Alert(Widget):
         title = f'<div class="hui-alert-title">{esc(self.title)}</div>' if self.title else ""
         return (
             f'<div class="hui-alert{kind_class}">'
-            f'<span class="hui-alert-icon">{self.ICONS[self.kind]}</span>'
+            f'<span class="hui-alert-icon" aria-hidden="true">{self.MARKS[self.kind]}</span>'
             f"<div>{title}<div>{esc(self.message)}</div></div>"
             f"</div>"
         )
@@ -85,7 +86,7 @@ class Quiz(Widget):
         answer: object,
         explanation: object = None,
         correct_text: str = "✓ 正解！",
-        incorrect_text: str = "✗ ざんねん…",
+        incorrect_text: str = "× ざんねん…",
     ):
         choice_list = [str(c) for c in choices]
         if len(choice_list) < 2:
@@ -335,7 +336,7 @@ class RawHtml(Widget):
 def card(title, body="", icon=None, footer=None) -> Card:
     """説明カード。
 
-    >>> ui.card("今日の目標", "for文を使って、九九の表を作ってみよう！", icon="🎯")
+    >>> ui.card("今日の目標", "for文を使って、九九の表を作ってみよう！")
     """
     return Card(title, body=body, icon=icon, footer=footer)
 
@@ -354,7 +355,7 @@ def quiz(
     answer,
     explanation=None,
     correct_text="✓ 正解！",
-    incorrect_text="✗ ざんねん…",
+    incorrect_text="× ざんねん…",
 ) -> Quiz:
     """選択式クイズ。選ぶと CSS だけで正誤が色とマークで表示される。
 
@@ -391,7 +392,7 @@ def progress(value, max=100, label=None, show_value=True) -> Progress:
 def stat(label, value, unit=None, icon=None) -> Stat:
     """数値の強調表示タイル。
 
-    >>> ui.stat("正答率", 85, unit="%", icon="📈")
+    >>> ui.stat("正答率", 85, unit="%")
     """
     return Stat(label, value, unit=unit, icon=icon)
 
