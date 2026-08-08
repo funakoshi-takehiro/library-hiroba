@@ -64,7 +64,11 @@ class Widget:
         return "<style>\n" + "\n".join(parts) + "\n</style>"
 
     def _repr_html_(self) -> str:
-        return f'{self._style_block()}\n<div class="hui">\n{self.fragment()}\n</div>'
+        # <style> は必ずルートの <div> の内側に置く。断片 HTML の先頭に置くと、
+        # ブラウザの HTML パーサがこれを body の外（head 相当の位置）へ移動させ、
+        # PyHiroba のサニタイズ（DOMPurify）を通した時点で失われてしまう。
+        # 内側にあれば設定を変えずにそのまま残る。
+        return f'<div class="hui">\n{self._style_block()}\n{self.fragment()}\n</div>'
 
     def __repr__(self) -> str:
         return f"<ui_hiroba.{type(self).__name__}>"

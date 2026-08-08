@@ -34,10 +34,23 @@ def test_evil_text_is_escaped(name):
 
 
 @pytest.mark.parametrize("name", sorted(sample_widgets()))
-def test_style_and_root_are_present(name):
+def test_style_is_nested_inside_the_root_div(name):
+    """<style> はルートの <div> の内側に置く。
+
+    断片 HTML の先頭に <style> を置くと、ブラウザの HTML パーサがそれを body の外へ
+    移動させるため、PyHiroba のサニタイズ（DOMPurify）を通した時点で失われ、
+    デザインが一切適用されない状態になる。実際の DOMPurify 3.4.12 で、
+    内側に置いた場合は出力がバイト単位で一致することを確認済み。
+    """
     rendered = sample_widgets()[name]._repr_html_()
-    assert rendered.startswith("<style>")
-    assert '<div class="hui">' in rendered
+    assert rendered.startswith('<div class="hui">')
+    assert rendered.index("<style>") > rendered.index('<div class="hui">')
+    assert rendered.rstrip().endswith("</div>")
+
+
+@pytest.mark.parametrize("name", sorted(sample_widgets()))
+def test_theme_layers(name):
+    rendered = sample_widgets()[name]._repr_html_()
     # 既定はライト、ダークは data-theme="dark" のときだけ
     assert '[data-theme="dark"] .hui' in rendered
     # OS の配色設定は見ない（ライトのページで部品だけ黒くなるのを防ぐ）
