@@ -433,6 +433,36 @@ COMPONENT_CSS = {
   .hui-submit:hover { filter: brightness(1.08); }
 }
 .hui-form-out:not(:empty) { margin-top: 12px; }""",
+    "chat": """\
+.hui-chat { display: flex; flex-direction: column; gap: 10px; margin: 10px 0; }
+.hui-msg { display: flex; flex-direction: column; max-width: 82%; }
+.hui-msg-name { font-size: 0.8em; color: var(--hui-ink-3); margin-bottom: 2px; }
+.hui-msg-body {
+  border-radius: var(--hui-radius);
+  padding: 10px 14px;
+  color: var(--hui-ink);
+}
+.hui-msg-body > :first-child { margin-top: 0; }
+.hui-msg-body > :last-child { margin-bottom: 0; }
+.hui-msg-user { align-self: flex-end; align-items: flex-end; }
+.hui-msg-user .hui-msg-body {
+  background: var(--hui-accent-soft);
+  border: 1px solid var(--hui-accent-soft);
+  border-bottom-right-radius: var(--hui-radius-sm);
+}
+.hui-msg-assistant { align-self: flex-start; }
+.hui-msg-assistant .hui-msg-body {
+  background: var(--hui-paper);
+  border: 1px solid var(--hui-line);
+  box-shadow: var(--hui-shadow);
+  border-bottom-left-radius: var(--hui-radius-sm);
+}
+.hui-msg-note { align-self: center; max-width: 100%; }
+.hui-msg-note .hui-msg-body {
+  background: var(--hui-bg-2);
+  border: 1px solid var(--hui-line);
+  font-size: 0.9em;
+}""",
     "stack": """\
 .hui-stack { display: flex; flex-direction: column; margin: 10px 0; }
 .hui-stack > * { margin: 0; }

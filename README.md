@@ -62,6 +62,7 @@ PyHiroba では、同梱されていれば `import ui_hiroba` だけで使えま
 | テーブル | `ui.table([{"名前": "佐藤", "得点": 90}], caption="結果")` |
 | 自由 HTML/CSS | `ui.html('<div class="x">…</div>', css=".x { color: hotpink; }")` |
 | 入力フォーム | `ui.form(handler, ui.field("question", label="質問"))` |
+| 会話の表示 | `ui.chat([{"role": "user", "content": "…"}, {"role": "assistant", "content": "…"}])` |
 
 複数の部品は次のようにまとめます。
 
@@ -97,6 +98,26 @@ ui.form(ask,
 | PyHiroba | HTML のフォームを表示します。値を受け取るには本体側の対応が必要です（[`docs/PYHIROBA_FORMS.md`](docs/PYHIROBA_FORMS.md) に設計案があります） |
 
 先生が書くコードは1つで済み、環境ごとの切り替えは不要です。
+
+### チャット形式にする
+
+`ui.chat()` は会話を吹き出しで並べます。役割は `user` / `assistant` / `note` の3つで、`content` には文字列のほか他の部品も入れられます。
+
+会話を変数にためて `ui.chat()` を返すようにすると、1つのセルだけでチャットができます。`clear_on_submit=True` を付けると、送信のたびに入力欄が空になります。
+
+```python
+history = []
+
+def ask(question):
+    history.append({"role": "user", "content": question})
+    history.append({"role": "assistant", "content": f"「{question}」ですね。"})
+    return ui.chat(history, names={"user": "あなた", "assistant": "ボット"})
+
+ui.form(ask, ui.field("question", label="質問"),
+        submit_label="送信", clear_on_submit=True)
+```
+
+実際に動く教材は [`examples/school_rules_bot.ipynb`](examples/school_rules_bot.ipynb) にあります。
 
 ## デザイン
 

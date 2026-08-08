@@ -452,3 +452,60 @@ def stack(*items, gap="12px") -> Stack:
     >>> ui.stack(ui.card("目標", "..."), ui.progress(3, max=10))
     """
     return Stack(items, gap=gap)
+
+
+class Chat(Container):
+    """会話を吹き出しで並べる部品。"""
+
+    css_keys = ("chat",)
+
+    ROLES = ("user", "assistant", "note")
+    DEFAULT_NAMES: ClassVar[dict[str, str]] = {"user": "あなた", "assistant": "AI", "note": ""}
+
+    def __init__(self, messages: Sequence[object], names: dict | None = None):
+        rows = []
+        for message in messages:
+            if isinstance(message, dict):
+                role, content = message.get("role", "assistant"), message.get("content", "")
+            else:
+                role, content = message
+            role = str(role)
+            if role not in self.ROLES:
+                raise ValueError(
+                    f"role は {list(self.ROLES)} のいずれかにしてください（指定値: {role!r}）"
+                )
+            rows.append((role, content))
+        if not rows:
+            raise ValueError("メッセージを1つ以上渡してください")
+        # 中身が部品なら CSS をまとめるため、コンテナの子として扱う
+        super().__init__([content for _role, content in rows])
+        self.roles = [role for role, _content in rows]
+        self.names = {**self.DEFAULT_NAMES, **(names or {})}
+
+    def fragment(self) -> str:
+        rows = []
+        for role, child in zip(self.roles, self.children):
+            name = self.names.get(role, "")
+            label = f'<span class="hui-msg-name">{esc(name)}</span>' if name else ""
+            rows.append(
+                f'<div class="hui-msg hui-msg-{role}">{label}'
+                f'<div class="hui-msg-body">{child.fragment()}</div></div>'
+            )
+        return f'<div class="hui-chat">{"".join(rows)}</div>'
+
+
+def chat(messages, names=None) -> Chat:
+    """会話を吹き出しで表示する。
+
+    ``messages`` は ``{"role": ..., "content": ...}`` の並び、または
+    ``(role, content)`` の並び。role は user / assistant / note のいずれか。
+    content には文字列のほか、他の部品もそのまま入れられる。
+
+    >>> ui.chat([
+    ...     {"role": "user", "content": "スマホは持っていっていい？"},
+    ...     {"role": "assistant", "content": "はい、持ってきていいです。"},
+    ... ])
+
+    表示名は ``names={"user": "生徒", "assistant": "先生"}`` で変えられる。
+    """
+    return Chat(messages, names=names)

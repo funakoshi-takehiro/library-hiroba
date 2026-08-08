@@ -201,3 +201,63 @@ def test_registry_does_not_grow_without_bound():
     for _ in range(_forms._REGISTRY_LIMIT + 20):
         make_form()._repr_html_()
     assert len(_forms._REGISTRY) <= _forms._REGISTRY_LIMIT
+
+
+def test_clear_on_submit_empties_text_fields(fake_ipython, monkeypatch):
+    class FakeWidget:
+        def __init__(self, **kwargs):
+            self.value = kwargs.get("value", "")
+            self.fn = None
+
+        def on_click(self, fn):
+            self.fn = fn
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    fake = types.ModuleType("ipywidgets")
+    for name in ("Text", "Textarea", "FloatText", "Dropdown", "Button", "Output", "HTML"):
+        setattr(fake, name, FakeWidget)
+    fake.VBox = lambda children: {"vbox": list(children)}
+    monkeypatch.setitem(sys.modules, "ipywidgets", fake)
+
+    ui.form(lambda question: ui.card(question), "question", clear_on_submit=True)._ipython_display_()
+    children = fake_ipython.displayed[0]["vbox"]
+    text_box, button = children[0], children[1]
+
+    text_box.value = "スマホは？"
+    button.fn(None)
+    assert text_box.value == ""
+
+
+def test_values_are_kept_when_clear_on_submit_is_off(fake_ipython, monkeypatch):
+    class FakeWidget:
+        def __init__(self, **kwargs):
+            self.value = kwargs.get("value", "")
+            self.fn = None
+
+        def on_click(self, fn):
+            self.fn = fn
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    fake = types.ModuleType("ipywidgets")
+    for name in ("Text", "Textarea", "FloatText", "Dropdown", "Button", "Output", "HTML"):
+        setattr(fake, name, FakeWidget)
+    fake.VBox = lambda children: {"vbox": list(children)}
+    monkeypatch.setitem(sys.modules, "ipywidgets", fake)
+
+    ui.form(lambda question: ui.card(question), "question")._ipython_display_()
+    children = fake_ipython.displayed[0]["vbox"]
+    text_box, button = children[0], children[1]
+
+    text_box.value = "そのまま残る"
+    button.fn(None)
+    assert text_box.value == "そのまま残る"

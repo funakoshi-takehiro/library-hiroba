@@ -269,3 +269,44 @@ def test_css_is_scoped_to_needed_components():
     assert ".hui-card {" in card_html
     assert ".hui-quiz {" not in card_html
     assert ".hui-table" not in card_html
+
+
+# --- chat -------------------------------------------------------------------
+
+
+def test_chat_accepts_dicts_and_tuples():
+    a = ui.chat([{"role": "user", "content": "こんにちは"}]).fragment()
+    b = ui.chat([("user", "こんにちは")]).fragment()
+    assert "hui-msg-user" in a and "こんにちは" in a
+    assert a.replace("dict", "") and "hui-msg-user" in b
+
+
+def test_chat_roles_and_names():
+    markup = ui.chat(
+        [("user", "質問"), ("assistant", "答え"), ("note", "メモ")],
+        names={"user": "生徒", "assistant": "先生"},
+    ).fragment()
+    for role in ("user", "assistant", "note"):
+        assert f"hui-msg-{role}" in markup
+    assert "生徒" in markup and "先生" in markup
+
+
+def test_chat_content_can_be_another_widget():
+    rendered = ui.chat(
+        [("assistant", ui.reveal("第9条の全文", summary="読んだ条文"))]
+    )._repr_html_()
+    assert "<details" in rendered
+    assert ".hui-reveal {" in rendered  # 子の CSS もまとめて同梱される
+
+
+def test_chat_validation():
+    with pytest.raises(ValueError):
+        ui.chat([])
+    with pytest.raises(ValueError):
+        ui.chat([("teacher", "未対応の役割")])
+
+
+def test_chat_escapes_text():
+    rendered = ui.chat([("user", "<script>alert(1)</script>")])._repr_html_()
+    assert "<script" not in rendered.lower()
+    assert "&lt;script&gt;" in rendered

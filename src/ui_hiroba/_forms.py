@@ -113,6 +113,7 @@ class Form(Widget):
         fields: Sequence[FieldLike],
         submit_label: str = "送信",
         title: object = None,
+        clear_on_submit: bool = False,
     ):
         if not callable(handler):
             raise ValueError("handler には関数を渡してください")
@@ -125,6 +126,7 @@ class Form(Widget):
             raise ValueError(f"入力欄の name が重複しています: {names}")
         self.submit_label = submit_label
         self.title = title
+        self.clear_on_submit = clear_on_submit
         self.form_id = unique_name("hui-form")
 
     # --- 表示 ---------------------------------------------------------------
@@ -199,8 +201,13 @@ class Form(Widget):
         button = widgets.Button(description=self.submit_label, button_style="primary")
         output = widgets.Output()
 
+        clearable = {f.name for f in self.fields if f.kind in ("text", "multiline")}
+
         def on_click(_):
             values = {name: control.value for name, control in controls.items()}
+            if self.clear_on_submit:
+                for name in clearable:
+                    controls[name].value = ""
             with output:
                 clear_output(wait=True)
                 display(self.handler(**values))
@@ -240,7 +247,7 @@ def field(name, label=None, placeholder="", kind="text", choices=None, default="
     )
 
 
-def form(handler, *fields, submit_label="送信", title=None) -> Form:
+def form(handler, *fields, submit_label="送信", title=None, clear_on_submit=False) -> Form:
     """入力欄とボタンを表示し、押されたら ``handler`` を呼ぶ。
 
     ``handler`` は入力欄の name をキーワード引数として受け取り、
@@ -254,4 +261,10 @@ def form(handler, *fields, submit_label="送信", title=None) -> Form:
 
     >>> ui.form(ask, "question")
     """
-    return Form(handler, fields, submit_label=submit_label, title=title)
+    return Form(
+        handler,
+        fields,
+        submit_label=submit_label,
+        title=title,
+        clear_on_submit=clear_on_submit,
+    )
