@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "ui-hiroba"
 dynamic = ["version"]
-description = "Colab と PyHiroba の両方で動く、サーバー不要の教育向け UI 表示ライブラリ"
+description = "Google Colab と PyHiroba で動く、教育向けの UI 表示ライブラリ"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"

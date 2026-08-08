@@ -1,4 +1,4 @@
-"""ui_hiroba — Colab と PyHiroba の両方で動く、サーバー不要の教育向け UI 表示ライブラリ。
+"""ui_hiroba — Google Colab と PyHiroba で動く、教育向けの UI 表示ライブラリ。
 
 使い方（セル最後の式に置くと表示される）::
 
@@ -6,9 +6,15 @@
 
     ui.card("今日の目標", "for文を使って、九九の表を作ってみよう！")
 
-仕組み: 各部品は ``_repr_html_()`` で自己完結な HTML/CSS を返す。
-JavaScript もサーバーも使わないため、ブラウザ内完結の PyHiroba でも
-Google Colab のサンドボックス iframe でも同じように表示される。
+用意された部品のほかに、``ui.html()`` で HTML と CSS を自由に書ける::
+
+    ui.html('<div class="memo">ヒント</div>',
+            css=".memo { border: 2px solid var(--hui-accent); }")
+
+しくみ: 各部品は ``_repr_html_()`` で自己完結の HTML と CSS を返す。
+表示も操作も HTML と CSS だけで完結するため、ブラウザ内で動く PyHiroba
+（https://pyhiroba.weblab.t.u-tokyo.ac.jp/）でも、Google Colab の
+サンドボックス iframe でも同じように表示される。
 """
 
 from ._components import (
