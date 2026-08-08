@@ -38,7 +38,7 @@ from ._components import (
 from ._core import Widget, show
 from ._forms import field, form, get_form
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 __all__ = [
     "Widget",

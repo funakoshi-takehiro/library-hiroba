@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -7,6 +8,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import ui_hiroba as ui
+
+
+def has_rule(html: str, selector: str) -> bool:
+    """CSS に selector の規則が含まれるか。
+
+    CSS は読み込み時に縮められるため、``{`` の前の空白の有無に依存しない形で調べる。
+    """
+    return re.search(re.escape(selector) + r"\s*\{", html) is not None
 
 
 def sample_widgets(text: str = "サンプル") -> dict[str, ui.Widget]:

@@ -67,6 +67,11 @@ class Field:
         self.placeholder = placeholder
         self.kind = kind
         self.choices = [str(c) for c in choices] if choices else []
+        # 選択欄で default を書かなかった場合は最初の選択肢にする。
+        # 指定しないと ipywidgets は未選択（handler が None を受け取る）、
+        # HTML の select は先頭が選択済みとなり、経路で結果がずれる。
+        if kind == "choice" and str(default) not in self.choices:
+            default = self.choices[0]
         self.default = default
 
     def control_html(self) -> str:
@@ -92,10 +97,34 @@ class Field:
             f"{self.control_html()}</label>"
         )
 
-    def ask_via_input(self) -> str:
-        """``input()`` で1つ聞く（ipywidgets が使えない環境向け）。"""
+    def convert(self, raw: str) -> object:
+        """``input()`` で受け取った文字列を、この欄の型に合わせる。
+
+        ipywidgets 経路は数値欄で float を返すため、``input()`` 経路も
+        揃えないと同じコードの計算結果が変わってしまう。
+        """
+        if self.kind == "number":
+            return float(raw)
+        if self.kind == "choice" and raw not in self.choices:
+            raise ValueError(f"{'／'.join(self.choices)} のどれかを入力してください")
+        return raw
+
+    def ask_via_input(self, attempts: int = 3) -> object:
+        """``input()`` で1つ聞く（ipywidgets が使えない環境向け）。
+
+        入力が型に合わないときは聞き直す。それでも合わなければ例外にする。
+        """
         hint = f"（{'／'.join(self.choices)}）" if self.kind == "choice" else ""
-        return input(f"{self.label}{hint}： ")
+        for remaining in range(attempts - 1, -1, -1):
+            raw = input(f"{self.label}{hint}： ")
+            try:
+                return self.convert(raw)
+            except ValueError as error:
+                if remaining == 0:
+                    raise ValueError(f"{self.label}: {error}") from None
+                message = error if self.kind == "choice" else "数を入力してください"
+                print(f"  {message}（あと{remaining}回）")
+        raise AssertionError("到達しない")
 
 
 def as_field(item: FieldLike) -> Field:

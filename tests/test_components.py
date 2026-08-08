@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 import pytest
+from conftest import has_rule
 
 import ui_hiroba as ui
 
@@ -69,7 +70,7 @@ def test_pyhiroba_design_tokens_and_font():
     assert "fonts.googleapis.com" in rendered  # 未読込環境向けの @import（失敗時は system-ui）
     assert "#028DAE" in rendered  # ライトのブランドティール
     assert "#35aecb" in rendered  # ダークのブランドティール
-    assert 'font-feature-settings: "palt"' in rendered
+    assert re.search(r'font-feature-settings:\s*"palt"', rendered)
 
 
 def test_table_css_outranks_pyhiroba_output_html_styles():
@@ -107,9 +108,9 @@ def test_quiz_validation():
 def test_quiz_explanation_pulls_in_reveal_css():
     with_exp = ui.quiz("q?", ["a", "b"], "a", explanation="なぜなら")._repr_html_()
     without = ui.quiz("q?", ["a", "b"], "a")._repr_html_()
-    assert ".hui-reveal {" in with_exp
+    assert has_rule(with_exp, ".hui-reveal")
     assert "解説を見る" in with_exp
-    assert ".hui-reveal {" not in without
+    assert not has_rule(without, ".hui-reveal")
 
 
 # --- reveal / progress / stat ----------------------------------------------
@@ -180,14 +181,14 @@ def test_table_from_dicts_derives_headers_in_order():
     rendered = ui.table(
         [{"名前": "佐藤", "得点": 90}, {"名前": "鈴木", "得点": 85, "備考": "追試"}]
     )._repr_html_()
-    assert "<th>名前</th><th>得点</th><th>備考</th>" in rendered
+    assert '<th scope="col">名前</th>' in rendered and '<th scope="col">備考</th>' in rendered
     assert "<td></td>" in rendered  # 1行目の「備考」は空セル
 
 
 def test_table_from_lists_with_headers_and_caption():
     rendered = ui.table([[1, 2], [3, 4]], headers=["x", "y"], caption="表1")._repr_html_()
     assert "<caption>表1</caption>" in rendered
-    assert "<th>x</th><th>y</th>" in rendered
+    assert '<th scope="col">x</th><th scope="col">y</th>' in rendered
     assert "<td>3</td><td>4</td>" in rendered
 
 
@@ -266,8 +267,8 @@ def test_show_returns_widget_without_ipython():
 
 def test_css_is_scoped_to_needed_components():
     card_html = ui.card("a")._repr_html_()
-    assert ".hui-card {" in card_html
-    assert ".hui-quiz {" not in card_html
+    assert has_rule(card_html, ".hui-card")
+    assert not has_rule(card_html, ".hui-quiz")
     assert ".hui-table" not in card_html
 
 
@@ -296,7 +297,7 @@ def test_chat_content_can_be_another_widget():
         [("assistant", ui.reveal("第9条の全文", summary="読んだ条文"))]
     )._repr_html_()
     assert "<details" in rendered
-    assert ".hui-reveal {" in rendered  # 子の CSS もまとめて同梱される
+    assert has_rule(rendered, ".hui-reveal")  # 子の CSS もまとめて同梱される
 
 
 def test_chat_validation():
@@ -310,3 +311,71 @@ def test_chat_escapes_text():
     rendered = ui.chat([("user", "<script>alert(1)</script>")])._repr_html_()
     assert "<script" not in rendered.lower()
     assert "&lt;script&gt;" in rendered
+
+
+# --- 監査で見つかった不具合の再発防止 ---------------------------------------
+
+
+def test_falsy_values_are_still_shown():
+    """0 や False は表示したい値。真偽判定で消してはいけない（B1）。"""
+    assert "<span>0</span>" in ui.card(0, "本文").fragment()
+    assert ">0<" in ui.alert("m", title=0).fragment()
+    assert ">0<" in ui.stat("得点", 1, unit=0).fragment()
+    assert ">0<" in ui.card(False, "本文").fragment().replace("False", "0")
+    # None と空文字は今までどおり出さない
+    assert "hui-card-title" not in ui.card(None, "本文").fragment()
+    assert "hui-card-title" not in ui.card("", "本文").fragment()
+
+
+def test_table_rejects_shapes_that_would_render_wrong():
+    """渡し方の取り違えを黙って通すと、壊れた表が出る（B2）。"""
+    with pytest.raises(ValueError, match="行の一覧"):
+        ui.table({"名前": "佐藤", "得点": 90})
+    with pytest.raises(ValueError, match="混ざって"):
+        ui.table([{"a": 1}, [2]])
+    with pytest.raises(ValueError, match="文字列"):
+        ui.table(["abc"])
+
+
+def test_table_pads_short_rows():
+    """列数が足りない行は空欄で埋める（B3）。"""
+    t = ui.table([[1, 2], [3]], headers=["a", "b"])
+    assert t.rows == [[1, 2], [3, ""]]
+    assert t.fragment().count("<td>") == 4
+
+
+def test_scoped_css_must_stay_inside_its_scope():
+    """} でスコープを抜ける CSS は受け付けない（S1）。"""
+    with pytest.raises(ValueError, match="波括弧"):
+        ui.html("x", css="} body { display: none } .x {")
+    with pytest.raises(ValueError, match="波括弧"):
+        ui.html("x", css=".a { color: red")  # 閉じ忘れ
+    # 文字列やコメントの中の } は数えない
+    ui.html("x", css='.a { content: "}" }')
+    ui.html("x", css="/* } */ .a { color: red }")
+    # 意図してページ全体に効かせる場合は scoped=False
+    assert ui.html("x", css="} body {}", scoped=False)
+
+
+def test_alert_kind_is_conveyed_to_screen_readers():
+    """記号は aria-hidden なので、種類は言葉でも伝える（W2）。"""
+    for kind, spoken in [("info", "お知らせ"), ("success", "できました"),
+                         ("warning", "注意"), ("danger", "警告")]:
+        assert f'<span class="hui-vh">{spoken}：</span>' in ui.alert("m", kind=kind).fragment()
+    assert has_rule(ui.alert("m")._repr_html_(), ".hui .hui-vh")
+
+
+def test_table_headers_have_scope():
+    """列見出しとして読み上げられるようにする（W2）。"""
+    assert '<th scope="col">a</th>' in ui.table([[1]], headers=["a"]).fragment()
+
+
+def test_css_is_minified_but_intact():
+    """出力ごとに CSS を同梱するため縮める。意味は変えない（W1）。"""
+    from ui_hiroba._css import BASE_CSS
+
+    assert "\n  " not in BASE_CSS  # 余白が落ちている
+    for token in ("#028DAE", "#35aecb", "Zen Kaku Gothic New", '[data-theme="dark"]'):
+        assert token in BASE_CSS
+    quiz = ui.quiz("q", ["a", "b"], "a")._repr_html_()
+    assert "@supports" in quiz and "@media" in quiz  # @ルールは壊れていない

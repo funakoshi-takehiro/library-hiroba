@@ -19,6 +19,23 @@
   セレクタは ``.hui`` を前置して詳細度を上げる。
 """
 
+import re
+
+
+def _minify(css: str) -> str:
+    """CSS から余白とコメントを落とす。
+
+    部品は出力ごとに CSS を同梱する（下地に依存せず表示するための設計で、
+    Colab は出力ごとに別の iframe になるため省略できない）。表示を変えずに
+    減らせる分だけ、読み込み時に一度だけ削る。
+    """
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
+    css = re.sub(r"\s*\n\s*", "\n", css)
+    css = re.sub(r"[ \t]{2,}", " ", css)
+    css = re.sub(r"\s*([{};:,])\s*", r"\1", css)
+    return re.sub(r";}", "}", css).strip()
+
+
 # PyHiroba 本体と同じ書体。読み込めない環境（オフライン・閉域網）では
 # 自動的に system-ui にフォールバックするため、表示は崩れない。
 FONT_IMPORT = (
@@ -99,6 +116,16 @@ BASE_CSS = f"""\
 }}
 [data-theme="dark"] .hui {{
 {_DARK_TOKENS}
+}}
+.hui .hui-vh {{
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }}
 .hui a {{ color: var(--hui-accent-ink); }}
 .hui b, .hui strong {{ font-weight: 700; }}"""
@@ -468,3 +495,6 @@ COMPONENT_CSS = {
 .hui-stack > * { margin: 0; }
 .hui-stack > .hui-badge, .hui-stack > .hui-stat { align-self: flex-start; }""",
 }
+
+BASE_CSS = _minify(BASE_CSS)
+COMPONENT_CSS = {key: _minify(css) for key, css in COMPONENT_CSS.items()}

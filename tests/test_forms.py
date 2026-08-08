@@ -261,3 +261,37 @@ def test_values_are_kept_when_clear_on_submit_is_off(fake_ipython, monkeypatch):
     text_box.value = "そのまま残る"
     button.fn(None)
     assert text_box.value == "そのまま残る"
+
+
+# --- 監査で見つかった不具合の再発防止 ---------------------------------------
+
+
+def test_number_field_returns_a_number_on_the_input_path(monkeypatch):
+    """ipywidgets 経路は float を返すので、input() 経路も揃える（B4）。"""
+    monkeypatch.setattr("builtins.input", lambda prompt="": "42")
+    value = ui.field("a", kind="number").ask_via_input()
+    assert isinstance(value, float) and value == 42.0
+
+
+def test_number_field_asks_again_then_gives_up(monkeypatch, capsys):
+    answers = iter(["いち", "に", "3"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    assert ui.field("a", kind="number").ask_via_input() == 3.0
+
+    answers = iter(["a", "b", "c"])
+    with pytest.raises(ValueError, match="could not convert"):
+        ui.field("a", kind="number").ask_via_input()
+
+
+def test_choice_field_rejects_values_outside_the_choices(monkeypatch):
+    answers = iter(["特大", "大"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    field = ui.field("size", kind="choice", choices=["小", "大"])
+    assert field.ask_via_input() == "大"
+
+
+def test_choice_default_matches_across_paths():
+    """default 未指定なら、両経路とも最初の選択肢から始まる（B5）。"""
+    field = ui.field("size", kind="choice", choices=["小", "大"])
+    assert field.default == "小"
+    assert 'value="小" selected' in field.control_html()

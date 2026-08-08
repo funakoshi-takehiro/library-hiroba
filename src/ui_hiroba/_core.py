@@ -20,6 +20,15 @@ def esc_attr(value: object) -> str:
     return _html.escape(str(value), quote=True)
 
 
+def shown(value: object) -> bool:
+    """表示すべき値かどうか。
+
+    ``0`` や ``False`` は表示したい値なので、真偽値での判定は使わない
+    （得点 0 点、第 0 問といった値が黙って消えてしまう）。
+    """
+    return value is not None and value != ""
+
+
 def unique_name(prefix: str = "hui") -> str:
     """document 全体で衝突しない一意な名前を返す。
 
@@ -61,7 +70,7 @@ class Widget:
         for block in self._iter_extra_css():
             if block not in parts:
                 parts.append(block)
-        return "<style>\n" + "\n".join(parts) + "\n</style>"
+        return "<style>" + "\n".join(parts) + "</style>"
 
     def _repr_html_(self) -> str:
         # <style> は必ずルートの <div> の内側に置く。断片 HTML の先頭に置くと、

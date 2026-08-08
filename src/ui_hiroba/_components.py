@@ -17,6 +17,7 @@ from ._core import (
     Widget,
     esc,
     esc_attr,
+    shown,
     unique_name,
 )
 
@@ -40,10 +41,12 @@ class Card(Widget):
 
     def fragment(self) -> str:
         parts = []
-        if self.title:
-            icon = f'<span class="hui-card-icon">{esc(self.icon)}</span>' if self.icon else ""
+        if shown(self.title):
+            icon = (
+                f'<span class="hui-card-icon">{esc(self.icon)}</span>' if shown(self.icon) else ""
+            )
             parts.append(f'<div class="hui-card-title">{icon}<span>{esc(self.title)}</span></div>')
-        if self.body != "" and self.body is not None:
+        if shown(self.body):
             parts.append(f'<div class="hui-card-body">{esc(self.body)}</div>')
         if self.footer is not None:
             parts.append(f'<div class="hui-card-footer">{esc(self.footer)}</div>')
@@ -60,6 +63,13 @@ class Alert(Widget):
         "warning": "!",
         "danger": "×",
     }
+    # 記号は目で見るためのもの（aria-hidden）。読み上げには言葉で種類を伝える
+    SPOKEN: ClassVar[dict[str, str]] = {
+        "info": "お知らせ",
+        "success": "できました",
+        "warning": "注意",
+        "danger": "警告",
+    }
 
     def __init__(self, message: object, kind: str = "info", title: object = None):
         if kind not in self.MARKS:
@@ -72,10 +82,13 @@ class Alert(Widget):
 
     def fragment(self) -> str:
         kind_class = "" if self.kind == "info" else f" hui-alert-{self.kind}"
-        title = f'<div class="hui-alert-title">{esc(self.title)}</div>' if self.title else ""
+        title = (
+            f'<div class="hui-alert-title">{esc(self.title)}</div>' if shown(self.title) else ""
+        )
         return (
             f'<div class="hui-alert{kind_class}">'
             f'<span class="hui-alert-icon" aria-hidden="true">{self.MARKS[self.kind]}</span>'
+            f'<span class="hui-vh">{self.SPOKEN[self.kind]}：</span>'
             f"<div>{title}<div>{esc(self.message)}</div></div>"
             f"</div>"
         )
@@ -206,8 +219,10 @@ class Stat(Widget):
         self.icon = icon
 
     def fragment(self) -> str:
-        icon = f"{esc(self.icon)} " if self.icon else ""
-        unit = f'<span class="hui-stat-unit">{esc(self.unit)}</span>' if self.unit else ""
+        icon = f"{esc(self.icon)} " if shown(self.icon) else ""
+        unit = (
+            f'<span class="hui-stat-unit">{esc(self.unit)}</span>' if shown(self.unit) else ""
+        )
         return (
             f'<div class="hui-stat">'
             f'<span class="hui-stat-label">{icon}{esc(self.label)}</span>'
@@ -274,10 +289,26 @@ class Table(Widget):
         headers: Sequence[object] | None = None,
         caption: object = None,
     ):
+        if isinstance(data, dict):
+            raise ValueError(
+                "data には行の一覧を渡してください。1行だけのときも "
+                'ui.table([{"名前": "佐藤"}]) のようにリストで囲みます。'
+            )
         rows = list(data)
         if not rows:
             raise ValueError("data が空です")
-        if all(isinstance(r, dict) for r in rows):
+
+        dict_rows = sum(isinstance(r, dict) for r in rows)
+        if dict_rows not in (0, len(rows)):
+            raise ValueError(
+                "行の形が混ざっています。すべて辞書にするか、すべてリストにしてください。"
+            )
+        if dict_rows == 0 and any(isinstance(r, str) for r in rows):
+            raise ValueError(
+                "行が文字列になっています。1行は値の一覧です（例: [[1, 2], [3, 4]]）。"
+            )
+
+        if dict_rows:
             if headers is None:
                 headers = []
                 for r in rows:
@@ -287,14 +318,19 @@ class Table(Widget):
             self.rows = [[r.get(h, "") for h in headers] for r in rows]
         else:
             self.rows = [list(r) for r in rows]
+
         self.headers = list(headers) if headers is not None else None
+        # 列数の足りない行は空欄で埋める（欠けたまま出すと列がずれる）
+        width = max([len(r) for r in self.rows] + [len(self.headers or [])])
+        for row in self.rows:
+            row.extend([""] * (width - len(row)))
         self.caption = caption
 
     def fragment(self) -> str:
         caption = f"<caption>{esc(self.caption)}</caption>" if self.caption is not None else ""
         thead = ""
         if self.headers is not None:
-            cells = "".join(f"<th>{esc(h)}</th>" for h in self.headers)
+            cells = "".join(f'<th scope="col">{esc(h)}</th>' for h in self.headers)
             thead = f"<thead><tr>{cells}</tr></thead>"
         body_rows = "".join(
             "<tr>" + "".join(f"<td>{esc(cell)}</td>" for cell in row) + "</tr>"
@@ -310,11 +346,51 @@ class Table(Widget):
 _STYLE_CLOSE_RE = re.compile(r"</style", re.IGNORECASE)
 
 
+def css_stays_inside_scope(css: str) -> bool:
+    """波括弧の対応が取れていて、スコープの外に出ていないかを調べる。
+
+    ``scoped=True`` の CSS は ``.一意なクラス { ... }`` の中に入れるが、
+    途中に余分な ``}`` があるとそこでスコープが閉じ、以降がページ全体に効く。
+    文字列とコメントの中の括弧は数えない。
+    """
+    depth = 0
+    i, n = 0, len(css)
+    quote = None
+    while i < n:
+        ch = css[i]
+        if quote is not None:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif css.startswith("/*", i):
+            end = css.find("*/", i + 2)
+            i = n if end == -1 else end + 2
+            continue
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth < 0:
+                return False
+        i += 1
+    return depth == 0
+
+
 class RawHtml(Widget):
     css_keys = ()
 
     def __init__(self, raw: object, css: str | None = None, scoped: bool = True):
         self.raw = str(raw)
+        if css is not None and scoped and not css_stays_inside_scope(str(css)):
+            raise ValueError(
+                "CSS の波括弧 { } の数が合っていません。閉じ忘れか、余分な } があります。"
+                "そのままだと CSS がこの部品の外に出て、ページ全体の見た目を変えてしまいます。"
+                "意図してページ全体に効かせたい場合は scoped=False を指定してください。"
+            )
         self.css = None if css is None else _STYLE_CLOSE_RE.sub(lambda _: "<\\/style", str(css))
         # scoped の場合はインスタンスごとに一意なクラスで CSS の効く範囲を限定する
         # （PyHiroba では全セルが 1 document を共有するため、ページや他セルを汚さない）
