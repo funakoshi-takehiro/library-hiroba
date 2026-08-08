@@ -128,8 +128,11 @@ python tools/build_gallery.py --shots       # 全部品のギャラリーとス�
 | [`notebooks/demo_colab.ipynb`](notebooks/demo_colab.ipynb) | 全部品の動作確認 |
 | [`notebooks/html_css_recipes.ipynb`](notebooks/html_css_recipes.ipynb) | HTML/CSS の作例集 |
 | [`notebooks/demo_pyhiroba.md`](notebooks/demo_pyhiroba.md) | PyHiroba に貼り付けるセル一覧 |
+| [`examples/school_rules_bot.ipynb`](examples/school_rules_bot.ipynb) | 校則チャットボットの教材（Google Colab 専用） |
 
-`.ipynb` は PyHiroba の「ファイルを開く」からも読み込めます。テストは各ノートブックのコードセルを実際に実行し、出力が安全チェックを通ることまで確認します。
+`.ipynb` は PyHiroba の「ファイルを開く」からも読み込めます。テストは `notebooks/` の各ノートブックのコードセルを実際に実行し、出力が安全チェックを通ることまで確認します。
+
+`examples/` は ui-hiroba を使った教材の作例です。PyTorch など重いライブラリを使うため Google Colab で動かします。テストの対象には含めません。
 
 リリース手順は [`docs/RELEASING.md`](docs/RELEASING.md) を参照してください。
 
