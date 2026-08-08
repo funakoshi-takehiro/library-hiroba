@@ -78,7 +78,9 @@ ui.html('<div class="box">ヒント</div>',
         css=".box { border: 2px solid var(--hui-accent); background: var(--hui-accent-soft); }")
 ```
 
-主な変数: `--hui-accent` / `--hui-accent-ink`（テキスト用の濃い版）/ `--hui-accent-soft`（背景用）、`--hui-ok` / `--hui-warn` / `--hui-bad`（同じく `-ink` `-soft` あり）、`--hui-ink` / `--hui-ink-2` / `--hui-ink-3`、`--hui-paper` / `--hui-bg-2` / `--hui-line`、`--hui-radius` / `--hui-radius-sm` / `--hui-shadow`。
+主な変数: `--hui-accent` / `--hui-accent-ink`（テキスト用の濃い版）/ `--hui-accent-soft`（背景用）、`--hui-ok` / `--hui-warn` / `--hui-bad`（同じく `-ink` `-soft` あり）、`--hui-on-accent`（アクセント色で塗った上に載せる文字色）、`--hui-ink` / `--hui-ink-2` / `--hui-ink-3`、`--hui-paper` / `--hui-bg-2` / `--hui-line`、`--hui-radius` / `--hui-radius-sm` / `--hui-shadow`。
+
+作例は [`notebooks/html_css_recipes.ipynb`](notebooks/html_css_recipes.ipynb) にまとめてあります。
 
 **フォントの読み込みについて**: 部品の CSS には Google Fonts の `@import` が含まれます（PyHiroba 本体と同じ書体を Colab でも表示するため）。オフラインや閉域網では取得に失敗しても `system-ui` にフォールバックするだけで、表示は崩れません。外部通信を完全にゼロにしたい場合は `src/ui_hiroba/_css.py` の `FONT_IMPORT` を空文字にしてください。
 
@@ -98,7 +100,15 @@ python tools/build_gallery.py               # 全部品のギャラリー HTML �
 python tools/build_gallery.py --shots       # + Playwright でライト/ダークのスクリーンショット
 ```
 
-動作確認用ノートブック: [`notebooks/demo_colab.ipynb`](notebooks/demo_colab.ipynb)（Colab で開く）/ [`notebooks/demo_pyhiroba.md`](notebooks/demo_pyhiroba.md)（PyHiroba に貼るセル一覧）
+ノートブック:
+
+| ファイル | 内容 |
+|---|---|
+| [`notebooks/demo_colab.ipynb`](notebooks/demo_colab.ipynb) | 全部品の動作確認（Colab / PyHiroba のどちらでも開けます） |
+| [`notebooks/html_css_recipes.ipynb`](notebooks/html_css_recipes.ipynb) | **HTML/CSS レシピ集** — ふきだし・手順ステップ・単語カード・横棒グラフ・付箋・よい例わるい例など、コピーして使える作例 |
+| [`notebooks/demo_pyhiroba.md`](notebooks/demo_pyhiroba.md) | PyHiroba に貼り付けるセル一覧（Markdown 版） |
+
+`.ipynb` は PyHiroba の「ファイルを開く」からも読み込めます。テストは各ノートブックのコードセルを実際に実行し、出力が安全チェックを通ることまで検証しています。
 
 リリース手順（PyPI Trusted Publishing）: [`docs/RELEASING.md`](docs/RELEASING.md)
 
