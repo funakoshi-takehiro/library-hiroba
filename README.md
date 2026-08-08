@@ -36,6 +36,11 @@ ui.quiz("2の8乗はいくつ？", choices=[128, 256, 512], answer=256,
 
 **PyHiroba:** 同梱（vendor）されていれば `import ui_hiroba` だけで使えます。同梱前の環境では `!pip install ui-hiroba`（micropip が PyPI から取得）。
 
+依存ライブラリはゼロで、配布物は `py3-none-any` の wheel です。そのため Colab の pip でも、ブラウザ内 Python（Pyodide）の micropip でも、追加の通信許可なしにそのまま入ります。
+
+> まだ PyPI に公開していない間は、GitHub から直接入れられます:
+> `%pip install "git+https://github.com/funakoshi-takehiro/ui-hiroba"`
+
 ## 部品一覧（v1）
 
 | 部品 | 例 |

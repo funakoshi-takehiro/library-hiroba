@@ -12,10 +12,35 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      # タグ v0.1.1 なのに __version__ が 0.1.0 のまま、という取り違えを
+      # ここで止める（そのまま進むと PyPI で「公開済み」エラーになり原因が分かりにくい）
+      - name: Check tag matches __version__
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VERSION="$(python -c 'import re,pathlib;
+          print(re.search(r"__version__ = \"([^\"]+)\"",
+          pathlib.Path("src/ui_hiroba/__init__.py").read_text()).group(1))')"
+          echo "tag=$TAG  __version__=$VERSION"
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "::error::タグ v$TAG と __version__ $VERSION が一致しません。" \
+                 "src/ui_hiroba/__init__.py を更新するか、タグを打ち直してください。"
+            exit 1
+          fi
+
+      # 壊れたものを公開しないよう、リリース時にもテストを通す
+      - name: Test
+        run: |
+          python -m pip install -e . pytest ruff
+          ruff check src tests tools
+          pytest -q
+
       - name: Build sdist and wheel
         run: |
-          python -m pip install build
+          python -m pip install build twine
           python -m build
+          twine check dist/*
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist
@@ -24,7 +49,9 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
-    environment: pypi
+    environment:
+      name: pypi
+      url: https://pypi.org/project/ui-hiroba/
     permissions:
       id-token: write  # PyPI Trusted Publishing (OIDC)
     steps:

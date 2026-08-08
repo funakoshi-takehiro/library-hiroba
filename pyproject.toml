@@ -11,19 +11,30 @@ requires-python = ">=3.9"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Takehiro Funakoshi" }]
-keywords = ["jupyter", "colab", "education", "ui", "notebook", "pyodide"]
+keywords = ["jupyter", "colab", "education", "ui", "notebook", "pyodide", "widgets", "html"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Education",
+  "Natural Language :: Japanese",
+  "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Framework :: Jupyter",
   "Topic :: Education",
+  "Topic :: Education :: Computer Aided Instruction (CAI)",
+  "Typing :: Typed",
 ]
 
 [project.urls]
 Homepage = "https://github.com/funakoshi-takehiro/ui-hiroba"
+Repository = "https://github.com/funakoshi-takehiro/ui-hiroba"
 Issues = "https://github.com/funakoshi-takehiro/ui-hiroba/issues"
+Changelog = "https://github.com/funakoshi-takehiro/ui-hiroba/releases"
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff", "build"]
