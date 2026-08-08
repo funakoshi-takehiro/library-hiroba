@@ -145,8 +145,7 @@ COMPONENT_CSS = {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  border-left: 4px solid var(--hui-accent);
-  border-radius: var(--hui-radius-sm);
+  border-radius: var(--hui-radius);
   background: var(--hui-accent-soft);
   color: var(--hui-ink);
   padding: 12px 16px;
@@ -166,11 +165,11 @@ COMPONENT_CSS = {
   text-align: center;
 }
 .hui-alert-title { font-weight: 700; letter-spacing: 0.01em; margin-bottom: 2px; }
-.hui-alert-success { border-left-color: var(--hui-ok); background: var(--hui-ok-soft); }
+.hui-alert-success { background: var(--hui-ok-soft); }
 .hui-alert-success .hui-alert-icon { background: var(--hui-ok); }
-.hui-alert-warning { border-left-color: var(--hui-warn); background: var(--hui-warn-soft); }
+.hui-alert-warning { background: var(--hui-warn-soft); }
 .hui-alert-warning .hui-alert-icon { background: var(--hui-warn); }
-.hui-alert-danger { border-left-color: var(--hui-bad); background: var(--hui-bad-soft); }
+.hui-alert-danger { background: var(--hui-bad-soft); }
 .hui-alert-danger .hui-alert-icon { background: var(--hui-bad); }""",
     "quiz": """\
 .hui-quiz {
