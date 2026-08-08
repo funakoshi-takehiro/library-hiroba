@@ -384,6 +384,55 @@ COMPONENT_CSS = {
 @media (hover: hover) {
   .hui .hui-table tbody tr:hover { background: var(--hui-accent-soft); }
 }""",
+    "form": """\
+.hui-form {
+  border: 1px solid var(--hui-line);
+  border-radius: var(--hui-radius);
+  background: var(--hui-paper);
+  box-shadow: var(--hui-shadow);
+  color: var(--hui-ink);
+  padding: 16px 18px;
+  margin: 10px 0;
+}
+.hui-form-title { font-weight: 700; letter-spacing: 0.01em; margin-bottom: 10px; }
+.hui-field { display: block; margin-bottom: 10px; }
+.hui-field-label {
+  display: block;
+  font-size: 0.88em;
+  color: var(--hui-ink-3);
+  margin-bottom: 3px;
+}
+.hui-input {
+  width: 100%;
+  font-family: inherit;
+  font-size: 1em;
+  color: var(--hui-ink);
+  background: var(--hui-paper);
+  border: 1px solid var(--hui-line);
+  border-radius: var(--hui-radius-sm);
+  padding: 8px 12px;
+}
+.hui-input:focus {
+  outline: 2px solid var(--hui-accent);
+  outline-offset: 1px;
+  border-color: var(--hui-accent);
+}
+.hui-submit {
+  font-family: inherit;
+  font-size: 0.95em;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--hui-on-accent);
+  background: var(--hui-accent);
+  border: 1px solid var(--hui-accent);
+  border-radius: 999px;
+  padding: 8px 22px;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .hui-submit:hover { filter: brightness(1.08); }
+}
+.hui-form-out:not(:empty) { margin-top: 12px; }""",
     "stack": """\
 .hui-stack { display: flex; flex-direction: column; margin: 10px 0; }
 .hui-stack > * { margin: 0; }

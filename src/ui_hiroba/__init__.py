@@ -11,6 +11,10 @@
     ui.html('<div class="memo">ヒント</div>',
             css=".memo { border: 2px solid var(--hui-accent); }")
 
+``ui.form()`` を使うと、入力を受け取って関数に渡せる::
+
+    ui.form(lambda question: ui.card(question, "答え"), "question")
+
 しくみ: 各部品は ``_repr_html_()`` で自己完結の HTML と CSS を返す。
 表示も操作も HTML と CSS だけで完結するため、ブラウザ内で動く PyHiroba
 （https://pyhiroba.weblab.t.u-tokyo.ac.jp/）でも、Google Colab の
@@ -31,8 +35,9 @@ from ._components import (
     table,
 )
 from ._core import Widget, show
+from ._forms import field, form, get_form
 
-__version__ = "0.1.2"
+__version__ = "0.2.0"
 
 __all__ = [
     "Widget",
@@ -41,6 +46,9 @@ __all__ = [
     "badge",
     "card",
     "columns",
+    "field",
+    "form",
+    "get_form",
     "html",
     "progress",
     "quiz",

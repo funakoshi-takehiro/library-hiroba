@@ -61,6 +61,7 @@ PyHiroba では、同梱されていれば `import ui_hiroba` だけで使えま
 | バッジ | `ui.badge("重要", color="red")`（color: `blue` / `green` / `red` / `amber` / `gray`） |
 | テーブル | `ui.table([{"名前": "佐藤", "得点": 90}], caption="結果")` |
 | 自由 HTML/CSS | `ui.html('<div class="x">…</div>', css=".x { color: hotpink; }")` |
+| 入力フォーム | `ui.form(handler, ui.field("question", label="質問"))` |
 
 複数の部品は次のようにまとめます。
 
@@ -70,6 +71,32 @@ ui.columns(ui.stat("得点", 90), ui.stat("順位", 3))        # 横に並べる
 ```
 
 セルの途中で表示したい場合は `ui.show(...)` を使います。Colab ではその場に表示され、IPython のない PyHiroba では部品を返すので、セル最後の式として置きます。
+
+## 入力を Python に戻す
+
+`ui.form()` は入力欄とボタンを表示し、押されたときに関数を呼びます。入力欄の名前が、そのままキーワード引数になります。
+
+```python
+def ask(question, level):
+    return ui.card(question, f"{level} 向けの答えです")
+
+ui.form(ask,
+        ui.field("question", label="質問", placeholder="スマホは持っていっていい？"),
+        ui.field("level", label="学年", kind="choice", choices=["1年", "2年", "3年"]),
+        title="校則について聞いてみよう", submit_label="聞く")
+```
+
+入力欄の種類は `text`（既定）/ `number` / `multiline` / `choice` です。`ui.field` の代わりに文字列を渡すと、その名前のテキスト欄になります。
+
+動かし方は環境に合わせて自動で切り替わります。
+
+| 環境 | 動作 |
+|---|---|
+| Colab・Jupyter（ipywidgets あり） | テキスト欄とボタンの対話 UI。押すたびに関数が呼ばれます |
+| ipywidgets が無い環境 | `input()` で順に聞いて、結果を表示します |
+| PyHiroba | HTML のフォームを表示します。値を受け取るには本体側の対応が必要です（[`docs/PYHIROBA_FORMS.md`](docs/PYHIROBA_FORMS.md) に設計案があります） |
+
+先生が書くコードは1つで済み、環境ごとの切り替えは不要です。
 
 ## デザイン
 
