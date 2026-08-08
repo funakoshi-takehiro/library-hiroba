@@ -25,7 +25,7 @@ ui.html('<div class="fukidashi">まずは print() を試してみよう</div>',
         css=".fukidashi { border: 2px solid var(--hui-accent); border-radius: 14px; padding: 10px 16px; }")
 ```
 
-CSS はその部品の内側だけに適用されるため、クラス名を気軽に付けてもページの他の部分に影響しません。ふきだし・手順ステップ・単語カード・横棒グラフなどの作例は [`notebooks/html_css_recipes.ipynb`](notebooks/html_css_recipes.ipynb) にまとめてあります。
+CSS はその部品の内側だけに適用されるため、クラス名を気軽に付けてもページの他の部分に影響しません。ふきだし、手順ステップ、単語カード、横棒グラフといった見た目も、この方法で作れます。
 
 そのほかの特徴は次のとおりです。
 
@@ -95,7 +95,7 @@ ui.form(ask,
 |---|---|
 | Colab・Jupyter（ipywidgets あり） | テキスト欄とボタンの対話 UI。押すたびに関数が呼ばれます |
 | ipywidgets が無い環境 | `input()` で順に聞いて、結果を表示します |
-| PyHiroba | HTML のフォームを表示します。値を受け取るには本体側の対応が必要です（[`docs/PYHIROBA_FORMS.md`](docs/PYHIROBA_FORMS.md) に設計案があります） |
+| PyHiroba | HTML のフォームを表示します。値を受け取るには本体側の対応が必要です（[`docs/PYHIROBA_FORMS.md`](https://github.com/funakoshi-takehiro/ui-hiroba/blob/main/docs/PYHIROBA_FORMS.md) に設計案があります） |
 
 先生が書くコードは1つで済み、環境ごとの切り替えは不要です。
 
@@ -116,8 +116,6 @@ def ask(question):
 ui.form(ask, ui.field("question", label="質問"),
         submit_label="送信", clear_on_submit=True)
 ```
-
-実際に動く教材は [`examples/school_rules_bot.ipynb`](examples/school_rules_bot.ipynb) にあります。
 
 ## デザイン
 
@@ -161,7 +159,9 @@ ui.html('<div class="box">ヒント</div>',
 
 各部品は、必要な CSS を同梱した自己完結の HTML を返します。同じ CSS が何度出力されても表示は変わりません。渡したテキストはすべて HTML エスケープされ、改行は `<br>` になります。エスケープしない経路は `ui.html()` だけです。
 
-現在の版が扱うのは表示と CSS による操作です。入力値を Python に戻すしくみは含みません。またクイズの正解は HTML の class として含まれるため、成績評価ではなく学習用の自己チェックに向いています。
+部品の表示と CSS による操作は、どの環境でも同じように動きます。入力を Python に戻す `ui.form()` は環境によって経路が変わり、PyHiroba では本体側の対応を待っています。
+
+クイズの正解は HTML の class として含まれるため、成績評価ではなく学習用の自己チェックに向いています。
 
 ## 開発
 
@@ -171,19 +171,8 @@ ruff check src tests tools && pytest        # lint とテスト
 python tools/build_gallery.py --shots       # 全部品のギャラリーとスクリーンショットを生成
 ```
 
-| ノートブック | 内容 |
-|---|---|
-| [`notebooks/demo_colab.ipynb`](notebooks/demo_colab.ipynb) | 全部品の動作確認 |
-| [`notebooks/html_css_recipes.ipynb`](notebooks/html_css_recipes.ipynb) | HTML/CSS の作例集 |
-| [`notebooks/demo_pyhiroba.md`](notebooks/demo_pyhiroba.md) | PyHiroba に貼り付けるセル一覧 |
-| [`examples/school_rules_bot.ipynb`](examples/school_rules_bot.ipynb) | 校則チャットボットの教材（Google Colab 専用） |
-
-`.ipynb` は PyHiroba の「ファイルを開く」からも読み込めます。テストは `notebooks/` の各ノートブックのコードセルを実際に実行し、出力が安全チェックを通ることまで確認します。
-
-`examples/` は ui-hiroba を使った教材の作例です。PyTorch など重いライブラリを使うため Google Colab で動かします。テストの対象には含めません。
-
-リリース手順は [`docs/RELEASING.md`](docs/RELEASING.md) を参照してください。
+リリース手順は [`docs/RELEASING.md`](https://github.com/funakoshi-takehiro/ui-hiroba/blob/main/docs/RELEASING.md) を参照してください。
 
 ## ライセンス
 
-[MIT](LICENSE)
+[MIT](https://github.com/funakoshi-takehiro/ui-hiroba/blob/main/LICENSE)
