@@ -486,6 +486,23 @@ def _dtype_keyword(pipeline) -> str:
     return "dtype" if "dtype" in inspect.signature(pipeline).parameters else "torch_dtype"
 
 
+def check_max_tokens(max_tokens: object) -> None:
+    """字数の指定が使える値かを、モデルに渡す前に確かめる。
+
+    素通しすると気付けない形で外れる。Colab では transformers の奥から
+    読めない例外が出て、ブラウザでは本体が黙って既定値に戻すため、
+    ``max_tokens=-50`` と書いた本人には何が起きたのか分からない。
+    """
+    if max_tokens is None:
+        return
+    # bool は int の一種。ai.ask(p, max_tokens=True) を 1 として通さない
+    if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens < 1:
+        raise ValueError(
+            f"max_tokens には 1 以上の整数を指定してください（指定値: {max_tokens!r}）。"
+            "省略すると 256 になります。"
+        )
+
+
 def in_browser() -> bool:
     """PyHiroba のワーカーの中にいるか。
 
@@ -555,6 +572,7 @@ class Ai:
 
     async def ask(self, prompt: object, max_tokens: int | None = None) -> str:
         """文章を渡して、続きを書いてもらう。"""
+        check_max_tokens(max_tokens)
         if in_browser():
             return await self._ask_in_browser(prompt, max_tokens)
         if self._pipe is None:
@@ -575,6 +593,7 @@ class Ai:
         つなげると ``ask()`` と同じ文になる。**少しずつ返せない環境では、
         全部書き終えてから一度にまとめて返す**（同じコードが動くことを優先）。
         """
+        check_max_tokens(max_tokens)
         if in_browser():
             async for chunk in self._stream_in_browser(prompt, max_tokens):
                 yield chunk

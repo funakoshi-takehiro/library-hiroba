@@ -145,6 +145,8 @@ async def hui_submit(form_id, values, send_html):
     send_html(result._repr_html_())
 ```
 
+`values` は 6-1 のとおり画面の `data-hui-field` を集めたものですが、**画面は検証ツールで書き換えられます**。そのため `submit()` は、教材の `ui.form(...)` に宣言された欄だけを `handler` に渡し、それ以外は捨てます。何を受け取るかを決めるのは画面ではなく Python 側です。余分な値を送っても害はありませんが、宣言された欄が足りない場合は `ValueError` になります。
+
 `handler` の書き方は3つあり、すべてに対応が必要です。
 
 | 書き方 | 返るもの | 対応 |

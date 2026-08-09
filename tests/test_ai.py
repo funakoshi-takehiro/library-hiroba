@@ -370,6 +370,31 @@ def test_arguments_are_json_strings(fresh_ai, in_browser):
         json.loads(args)
 
 
+@pytest.mark.parametrize("bad", [0, -1, -50, 1.5, "64", True, False])
+def test_a_nonsense_length_is_refused_before_the_model_sees_it(fresh_ai, in_browser, bad):
+    """透かすと、書いた本人に届かない形で外れる。
+
+    Colab は transformers の奥から読めない例外を出し、ブラウザは黙って
+    既定値に戻す。どちらも max_tokens=-50 と書いた理由には結び付かない。
+    """
+    with pytest.raises(ValueError, match="max_tokens"):
+        run(fresh_ai.ask("質問", max_tokens=bad))
+    assert in_browser.calls == [], "確かめる前に本体を呼んでいる"
+
+
+@pytest.mark.parametrize("good", [None, 1, 64, 4096])
+def test_ordinary_lengths_still_pass(fresh_ai, in_browser, good):
+    run(fresh_ai.ask("質問", max_tokens=good))
+
+
+def test_streaming_checks_the_length_too(fresh_ai, in_browser):
+    async def gather():
+        return [c async for c in fresh_ai.stream("質問", max_tokens=-1)]
+
+    with pytest.raises(ValueError, match="max_tokens"):
+        run(gather())
+
+
 def test_in_browser_detection(monkeypatch):
     monkeypatch.delitem(sys.modules, "js", raising=False)
     assert _ai.in_browser() is False

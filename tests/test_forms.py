@@ -534,6 +534,30 @@ def test_submit_accepts_values_that_are_already_typed():
     assert seen["age"] == 10.0
 
 
+def test_submit_ignores_values_the_form_did_not_ask_for():
+    """本体は画面の data-hui-field を集めて呼ぶが、画面は書き換えられる。
+
+    素通しすると、検証ツールで足した欄が handler の引数を決められてしまう。
+    何を受け取るかは、教材に書かれた Python のほうを正とする。
+    """
+    seen = {}
+
+    def handler(question):
+        seen.update(question=question)
+        return ui.card("ok")
+
+    f = ui.form(handler, "question")
+    f.submit(question="ほんとうの入力", api_key="盗みたい値")
+    assert seen == {"question": "ほんとうの入力"}
+
+
+def test_submit_still_refuses_when_a_field_is_missing():
+    """余分を捨てるようにしても、足りないほうは見逃さないこと。"""
+    f = ui.form(lambda question: question, "question")
+    with pytest.raises(ValueError, match="入力値が足りません"):
+        f.submit(nothing="x")
+
+
 def test_submit_says_which_field_was_wrong():
     f = ui.form(lambda age: age, ui.field("age", label="年れい", kind="number"))
     with pytest.raises(ValueError, match="年れい: 数を入力してください"):
