@@ -15,6 +15,7 @@ import time
 import types
 
 import pytest
+from sanitize_check import check_html
 
 import library_hiroba
 from library_hiroba import _ai
@@ -179,6 +180,28 @@ def test_every_model_records_where_it_comes_from(name):
     assert "/" in spec["browser_repo"], "ブラウザ側は 配布元/名前 の形で書くこと"
 
 
+@pytest.mark.parametrize("name", sorted(_ai.MODELS))
+def test_every_model_says_what_it_needs(name):
+    """モデルを増やしたとき、おすすめの判断材料を書き忘れないこと。"""
+    spec = _ai.MODELS[name]
+    assert isinstance(spec["rank"], int)
+    assert set(spec["needs"]) == {"browser", "colab"}
+    assert set(spec["needs"]["browser"]) == {"webgpu", "memory_gb", "storage_mb"}
+    assert set(spec["needs"]["colab"]) == {"ram_gb", "vram_gb"}
+
+
+def test_the_quality_order_has_no_ties():
+    """順位が重なると「いちばん良いもの」が呼ぶたびに変わりかねない。"""
+    ranks = [spec["rank"] for spec in _ai.MODELS.values()]
+    assert len(set(ranks)) == len(ranks), f"rank が重複しています: {sorted(ranks)}"
+
+
+def test_the_lightest_model_runs_without_webgpu():
+    """WebGPU の無い端末でも1つは動くこと（何も薦められない環境を作らない）。"""
+    assert _ai.MODELS[_ai._SAFEST]["needs"]["browser"]["webgpu"] is False
+    assert _ai.MODELS[_ai._SAFEST]["needs"]["colab"]["vram_gb"] is None
+
+
 # --- 考えている途中を隠す ---------------------------------------------------
 
 
@@ -323,12 +346,19 @@ def test_models_sends_null(fresh_ai, in_browser):
     assert in_browser.calls == []
 
 
-def test_only_the_three_allowed_kinds_are_used(fresh_ai, in_browser):
+# 本体の許可リストに載っているもの。増やすときは
+# docs/PYHIROBA_INTEGRATION.md と _ai.py のブラウザ経路の説明もそろえること。
+ALLOWED_KINDS = {"ai-load", "ai-ask", "ai-models", "ai-ask-start", "ai-ask-next", "ai-probe"}
+
+
+def test_only_allowed_kinds_are_used(fresh_ai, in_browser):
     run(fresh_ai.load())
     run(fresh_ai.ask("質問"))
     run(fresh_ai.models())
+    run(fresh_ai.environment())
+    run(fresh_ai.recommend())
     used = {kind for kind, _ in in_browser.calls}
-    assert used <= {"ai-load", "ai-ask", "ai-models"}
+    assert used <= ALLOWED_KINDS
 
 
 def test_arguments_are_json_strings(fresh_ai, in_browser):
@@ -720,3 +750,275 @@ def test_streaming_does_not_block_the_notebook(fresh_ai, monkeypatch):
 
     run(both())
     assert ticks, "受け取っているあいだ、ほかの処理が一切進んでいない"
+
+
+# --- 動く環境を調べる -------------------------------------------------------
+
+
+def browser_env(**changes):
+    """ブラウザで調べがついた状態。足りない項目は十分な値で埋める。"""
+    found = {
+        "known": True,
+        "where": "browser",
+        "webgpu": True,
+        "memory_gb": 8,
+        "ram_gb": None,
+        "vram_gb": None,
+        "cores": 8,
+        "storage_mb": 60000,
+        "label": "Chrome",
+    }
+    found.update(changes)
+    return found
+
+
+def colab_env(**changes):
+    """Colab で調べがついた状態。"""
+    found = {
+        "known": True,
+        "where": "colab",
+        "webgpu": False,
+        "memory_gb": None,
+        "ram_gb": 12.7,
+        "vram_gb": None,
+        "cores": 8,
+        "storage_mb": 60000,
+        "label": "CPU",
+    }
+    found.update(changes)
+    return found
+
+
+@pytest.mark.parametrize(
+    "found,expected",
+    [
+        # 調べられなかったら、環境によらず標準のものに落ちる
+        ({"known": False}, "qwen05"),
+        ({}, "qwen05"),
+        # ブラウザ。WebGPU が無ければ WASM でも待てる 150M まで落とす
+        (browser_env(), "qwen3_17"),
+        (browser_env(webgpu=False), "llmjp150m"),
+        (browser_env(memory_gb=4), "qwen3_06"),
+        # 低スペック機。qwen05 より軽い qwen3_06 が拾えるので 150M まで落とさない
+        (browser_env(memory_gb=2), "qwen3_06"),
+        (browser_env(memory_gb=1), "llmjp150m"),
+        # 回線ではなく置き場所が足りない場合も、落とす理由になる
+        (browser_env(storage_mb=1000), "qwen3_06"),
+        (browser_env(storage_mb=500), "llmjp150m"),
+        # Colab。CPU だけなら 1.5B 以上は待てないので選ばない
+        (colab_env(), "qwen3_06"),
+        (colab_env(vram_gb=15.0), "qwen3_17"),
+        (colab_env(vram_gb=2.0), "qwen3_06"),
+        (colab_env(ram_gb=3.0), "llmjp150m"),
+    ],
+)
+def test_the_best_model_that_actually_runs_is_chosen(found, expected):
+    assert _ai.choose(found)[0] == expected
+
+
+@pytest.mark.parametrize("found", [{"known": False}, browser_env(), colab_env()])
+def test_every_choice_explains_itself(found):
+    """理由の無いおすすめは出さない（利用者が判断を確かめられなくなる）。"""
+    name, reason = _ai.choose(found)
+    assert reason.endswith("。")
+    assert _ai._short_label(name) in reason
+
+
+def test_an_unmeasurable_browser_does_not_get_a_heavy_model():
+    """Firefox と Safari には navigator.deviceMemory が無い。
+
+    測れないぶんを「あるはず」で埋めると、動かない端末に 1.7B を薦めてしまう。
+    分からないときは標準より上に行かない。
+    """
+    name, reason = _ai.choose(browser_env(memory_gb=None))
+    assert name == _ai.DEFAULT_MODEL
+    assert "分からなかった" in reason
+
+
+def test_nothing_fits_still_returns_something_runnable():
+    """条件を満たすものが無くても、名前と理由は返す（例外にしない）。"""
+    name, reason = _ai.choose(browser_env(webgpu=False, memory_gb=1, storage_mb=10))
+    assert name in _ai.MODELS
+    assert "動かないかもしれません" in reason
+
+
+@pytest.mark.parametrize("found", [browser_env(), colab_env(), {"known": False}])
+def test_the_choice_can_always_be_loaded(found):
+    """選ばれた名前が resolve() を通ること（読み込む直前で落ちない）。"""
+    assert _ai.resolve(_ai.choose(found)[0])
+
+
+# --- 環境を調べる（ブラウザ） -----------------------------------------------
+
+
+def test_the_host_is_asked_with_an_empty_json_object(fresh_ai, in_browser):
+    in_browser.replies["ai-probe"] = {"webgpu": True}
+    run(fresh_ai.environment())
+    kinds = dict(in_browser.calls)
+    assert json.loads(kinds["ai-probe"]) == {}
+
+
+def test_the_browser_reply_is_read(fresh_ai, in_browser):
+    in_browser.replies["ai-probe"] = {
+        "webgpu": True,
+        "memoryGB": 8,
+        "cores": 12,
+        "storageMB": 40000,
+        "browser": "Chrome 120",
+    }
+    found = run(fresh_ai.environment())
+    assert found["known"] is True
+    assert found["where"] == "browser"
+    assert found["webgpu"] is True
+    assert found["memory_gb"] == 8
+    assert found["cores"] == 12
+    assert found["storage_mb"] == 40000
+    assert found["label"] == "Chrome 120"
+
+
+def test_a_host_that_does_not_know_ai_probe_is_not_an_error(fresh_ai, in_browser):
+    """未対応を伝えるために、本体が何かを実装する必要は無い（既定の {} で足りる）。"""
+    found = run(fresh_ai.environment())  # FakeHost は知らない kind に {} を返す
+    assert found["known"] is False
+    assert run(fresh_ai.recommend()).name == _ai.DEFAULT_MODEL
+
+
+def test_a_host_that_raises_is_not_an_error(fresh_ai, monkeypatch):
+    async def refuse(kind, args_json):
+        raise RuntimeError("許可されていない kind です")
+
+    js = types.ModuleType("js")
+    js.pyhirobaAsk = refuse
+    monkeypatch.setitem(sys.modules, "js", js)
+    assert run(fresh_ai.environment())["known"] is False
+
+
+@pytest.mark.parametrize("junk", ["8", None, True, [], {}])
+def test_values_that_are_not_numbers_are_treated_as_unknown(fresh_ai, in_browser, junk):
+    """本体が文字列で返しても、比較で TypeError にならないこと。"""
+    in_browser.replies["ai-probe"] = {"webgpu": True, "memoryGB": junk}
+    found = run(fresh_ai.environment())
+    assert found["memory_gb"] is None
+    assert _ai.choose(found)[0] == _ai.DEFAULT_MODEL
+
+
+def test_load_auto_uses_the_recommendation(fresh_ai, in_browser):
+    in_browser.replies["ai-probe"] = {"webgpu": True, "memoryGB": 8, "storageMB": 60000}
+    run(fresh_ai.load("auto"))
+    sent = [json.loads(args) for kind, args in in_browser.calls if kind == "ai-load"]
+    assert sent == [{"model": _ai.MODELS["qwen3_17"]["browser_key"]}]
+
+
+def test_load_without_an_argument_still_ignores_the_environment(fresh_ai, in_browser):
+    """既定を変えていないこと。同じ教材が環境ごとに違うモデルを読むと追えない。"""
+    in_browser.replies["ai-probe"] = {"webgpu": True, "memoryGB": 8, "storageMB": 60000}
+    run(fresh_ai.load())
+    sent = [json.loads(args) for kind, args in in_browser.calls if kind == "ai-load"]
+    assert sent == [{"model": _ai.MODELS[_ai.DEFAULT_MODEL]["browser_key"]}]
+    assert "ai-probe" not in {kind for kind, _ in in_browser.calls}
+
+
+# --- 環境を調べる（Colab） --------------------------------------------------
+
+
+def install_fake_torch(monkeypatch, vram_bytes=None, name="Tesla T4"):
+    """GPU のある／無い torch を差し替える。"""
+    torch = types.ModuleType("torch")
+    torch.cuda = types.SimpleNamespace(
+        is_available=lambda: vram_bytes is not None,
+        get_device_properties=lambda index: types.SimpleNamespace(
+            total_memory=vram_bytes, name=name
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "torch", torch)
+    monkeypatch.delitem(sys.modules, "js", raising=False)
+    return torch
+
+
+def test_a_gpu_runtime_is_recognised(fresh_ai, monkeypatch):
+    install_fake_torch(monkeypatch, vram_bytes=15 * 1024**3)
+    found = run(fresh_ai.environment())
+    assert found["where"] == "colab"
+    assert found["known"] is True
+    assert found["vram_gb"] == 15.0
+    assert found["label"] == "Tesla T4"
+
+
+def test_a_cpu_runtime_is_recognised(fresh_ai, monkeypatch):
+    install_fake_torch(monkeypatch, vram_bytes=None)
+    found = run(fresh_ai.environment())
+    assert found["vram_gb"] is None
+    assert found["label"] == "CPU"
+    # GPU が要るモデルは薦めない
+    assert _ai.MODELS[_ai.choose(found)[0]]["needs"]["colab"]["vram_gb"] is None
+
+
+def test_memory_is_read_without_extra_packages(monkeypatch):
+    """psutil を足さずに /proc/meminfo から読めること。"""
+    monkeypatch.delitem(sys.modules, "torch", raising=False)
+    assert _ai._total_ram_gb() > 0
+
+
+def test_a_machine_without_proc_meminfo_does_not_crash(monkeypatch):
+    """Windows などには /proc が無い。読めないだけで止まらないこと。"""
+
+    def refuse(*args, **kwargs):
+        raise FileNotFoundError("/proc/meminfo")
+
+    monkeypatch.setattr("builtins.open", refuse)
+    assert _ai._total_ram_gb() is None
+
+
+def test_a_broken_torch_does_not_stop_the_check(fresh_ai, monkeypatch):
+    """壊れた GPU 環境で、環境調べまで巻き添えにしない。"""
+    torch = types.ModuleType("torch")
+    torch.cuda = types.SimpleNamespace(
+        is_available=lambda: (_ for _ in ()).throw(RuntimeError("CUDA が壊れています"))
+    )
+    monkeypatch.setitem(sys.modules, "torch", torch)
+    monkeypatch.delitem(sys.modules, "js", raising=False)
+    found = run(fresh_ai.environment())
+    assert found["vram_gb"] is None
+    assert _ai.choose(found)[0] in _ai.MODELS
+
+
+def test_no_torch_yet_is_not_an_error(fresh_ai, monkeypatch):
+    """まだ pip install していないだけ。入れ方の案内は load() の仕事。"""
+    monkeypatch.setitem(sys.modules, "torch", None)  # import torch が失敗する
+    monkeypatch.delitem(sys.modules, "js", raising=False)
+    found = run(fresh_ai.environment())
+    assert found["label"] == "CPU"
+
+
+# --- おすすめの表示 ---------------------------------------------------------
+
+
+def test_the_recommendation_shows_as_html(fresh_ai, monkeypatch):
+    install_fake_torch(monkeypatch, vram_bytes=15 * 1024**3)
+    found = run(fresh_ai.recommend())
+    html = found._repr_html_()
+    assert check_html(html) == []
+    assert "Tesla T4" in html
+    assert found.name in _ai.MODELS
+
+
+def test_the_recommendation_is_readable_without_a_notebook(fresh_ai, monkeypatch):
+    """PyHiroba では print() で確かめることもある。"""
+    install_fake_torch(monkeypatch, vram_bytes=None)
+    found = run(fresh_ai.recommend())
+    assert found.name in repr(found)
+    assert found.reason in repr(found)
+
+
+def test_an_unknown_environment_still_renders():
+    """調べがつかなくても表は作れること（ui.table は空だと例外になる）。"""
+    shown = _ai.Recommendation("qwen05", "理由", {"known": False, "where": "colab"})
+    assert check_html(shown._repr_html_()) == []
+
+
+def test_the_recommendation_only_lists_what_was_measured():
+    shown = _ai.Recommendation("qwen05", "理由", _ai._blank("browser"))
+    labels = [row[0] for row in shown.rows()]
+    assert "空き容量" not in labels
+    assert "GPU のメモリ" not in labels
+    assert "読み込む名前" in labels

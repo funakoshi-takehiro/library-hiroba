@@ -51,7 +51,7 @@ globalThis.pyhirobaAsk = async (kind, argsJson) => { /* … */ return resultJson
 ```
 
 - 引数も返り値も **JSON 文字列だけ**です（Pyodide と JS の境界を単純に保つため）
-- `kind` は `ai-load` と `ai-ask` の2つが必須で、`ai-ask-start` / `ai-ask-next` は任意です（後述）。本体の許可リストに `ai-models` があっても、library-hiroba は呼びません（後述）
+- `kind` は `ai-load` と `ai-ask` の2つが必須です。`ai-ask-start` / `ai-ask-next`（書けたところから返す）と `ai-probe`（端末を調べる）は任意で、いずれも未対応なら自動的に落ちます（後述）。本体の許可リストに `ai-models` があっても、library-hiroba は呼びません（後述）
 
 | `kind` | 渡す JSON | 期待する JSON | 読む値 |
 |---|---|---|---|
@@ -73,6 +73,35 @@ globalThis.pyhirobaAsk = async (kind, argsJson) => { /* … */ return resultJson
 - 最後の呼び出しで `"done": true` を返します。`text` に残りが入っていても構いません
 - `id` を返さない、または `ai-ask-start` で失敗した場合、library-hiroba は `ai-ask` に切り替えます。**未対応であることを伝えるために、わざわざ何かを実装する必要はありません**
 - `<think>…</think>` はライブラリ側で取り除きます。チャンクの境目で割れていても大丈夫なので、本体は分割位置を気にしなくて構いません
+
+### 端末を調べる（任意）
+
+`ai.recommend()` と `ai.load("auto")` は、その端末で実用になるモデルのうちいちばん良いものを選びます。WebGPU の無い端末に 1.7B を読ませると画面が固まり、逆に動く端末で 150M を使うと答えが不自然になるためです。**対応は任意です** — 本体が知らなければ「調べられなかった」として、環境によらず既定の `qwen05` に落ちます。
+
+| `kind` | 渡す JSON | 期待する JSON |
+|---|---|---|
+| `ai-probe` | `{}` | `{"webgpu": true, "memoryGB": 8, "cores": 12, "storageMB": 40000, "browser": "Chrome 120"}` |
+
+- **`webgpu` だけが必須**です。これが入っていない返事は「答えられなかった」とみなします（`{}` を返せば未対応と伝わるので、**そのために何かを実装する必要はありません**）
+- ほかの4つは省略できます。省いた項目は判断に使いません。ただし `memoryGB` が無いときは、外れたときの影響が大きいので既定より重いモデルは選びません
+- 数値以外（文字列など）が入っていた項目は、無かったものとして扱います
+- 調べるのは端末の余力だけです。**利用者の入力や閲覧履歴に類するものは送らないでください**
+
+実装はこれで足ります。
+
+```js
+const adapter = navigator.gpu ? await navigator.gpu.requestAdapter() : null
+const room = await navigator.storage?.estimate?.()
+return JSON.stringify({
+  webgpu: !!adapter,
+  memoryGB: navigator.deviceMemory ?? null,       // Firefox / Safari には無い
+  cores: navigator.hardwareConcurrency ?? null,
+  storageMB: room ? Math.floor((room.quota - room.usage) / 1048576) : null,
+  browser: "Chrome 120",                          // 表示に使うだけ。省略可
+})
+```
+
+`requestAdapter()` は WebGPU が無効な環境で `null` を返します（例外にはなりません）。`navigator.gpu` 自体が無いこともあるので、上のように先に確かめてください。
 
 ### モデルの名前
 
@@ -145,3 +174,5 @@ optimum-cli export onnx --model llm-jp/llm-jp-3-440m-instruct3 --task text-gener
 | `ui` が標準ライブラリだけで動くか | `pytest tests/test_ai.py::test_ui_stays_dependency_free` |
 | 本体との受け渡しの形 | `pytest tests/test_ai.py`（`js.pyhirobaAsk` を偽物に差し替えて確かめています） |
 | Colab 経路が実際に動くか | `pip install "library-hiroba[ai]"` のうえで `python tools/check_ai_colab.py` |
+| 環境判定が実際の速さと釣り合うか | GPU の有る／無い Colab の両方で `python tools/check_ai_colab.py --model auto` |
+| 本体の `ai-probe` が期待どおりか | PyHiroba のセルで `await ai.recommend()`。未実装なら「調べられなかった」と出る |

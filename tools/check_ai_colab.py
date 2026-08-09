@@ -3,6 +3,11 @@
     pip install "library-hiroba[ai]"
     python tools/check_ai_colab.py                 # 一番軽い llmjp150m で確かめる
     python tools/check_ai_colab.py --model qwen05  # 既定のモデルで確かめる
+    python tools/check_ai_colab.py --model auto    # 環境を調べて選ばせる
+
+``--model auto`` は、この機械で調べがついた内容と、そこから選ばれたモデルを
+先に表示する。GPU の有る Colab と無い Colab の両方で走らせて、選ばれたものが
+実際の速さと釣り合っているかを見るのが、環境判定のいちばん確かな確かめ方。
 
 初回はモデルの取得（数百 MB〜）が始まるため、単体テストからは実行しない。
 Colab で確かめるときは、ノートブックのセルに次を貼ってもよい。
@@ -33,7 +38,17 @@ async def check(model: str, prompt: str, max_tokens: int) -> int:
         print("ここはブラウザ（PyHiroba）です。この確認は Colab 経路が対象です。")
         return 1
 
-    print(f"モデル: {model}")
+    found = await ai.environment()
+    print("調べた環境:")
+    for key in ("known", "label", "ram_gb", "vram_gb", "cores", "storage_mb"):
+        print(f"  {key:<11} {found[key]}")
+
+    if model == "auto":
+        chosen = await ai.recommend()
+        print(f"\nおすすめ: {chosen.name}\n  {chosen.reason}")
+        model = chosen.name
+
+    print(f"\nモデル: {model}")
     for entry in await ai.models():
         mark = "→" if entry["name"] == model else " "
         print(f"  {mark} {entry['name']:<10} {entry['approxMB']:>5}MB  {entry['label']}")
@@ -58,7 +73,7 @@ async def check(model: str, prompt: str, max_tokens: int) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", default="llmjp150m", choices=list(MODELS))
+    parser.add_argument("--model", default="llmjp150m", choices=[*MODELS, "auto"])
     parser.add_argument("--prompt", default="日本の四季について、2行で書いて")
     parser.add_argument("--max-tokens", type=int, default=48)
     args = parser.parse_args()
