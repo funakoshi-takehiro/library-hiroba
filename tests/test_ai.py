@@ -79,12 +79,29 @@ def test_unknown_attribute_raises():
         getattr(library_hiroba, "nope")  # noqa: B009 — __getattr__ を通すため
 
 
+# ui 側が import してよいもの。PyHiroba は ui をそのまま同梱して閉じた校内
+# ネットワークで動かすため、取りに行く先が増えると成り立たなくなる。増やすときに
+# 気付けるよう、ここに並べておく（sys.stdlib_module_names は 3.10 以降にしか無い）。
+UI_MAY_IMPORT = {
+    "__future__",
+    "asyncio",
+    "collections",
+    "html",
+    "inspect",
+    "re",
+    "secrets",
+    "typing",
+    # ノートブックのある環境でだけ使う。無ければ使わない作りになっている
+    "IPython",
+    "ipywidgets",
+}
+
+
 def test_ui_stays_dependency_free():
-    """ui 側が標準ライブラリ以外を import していないこと（PyHiroba 同梱の前提）。"""
+    """ui 側が、許したもの以外を import していないこと（PyHiroba 同梱の前提）。"""
     import ast
     from pathlib import Path
 
-    stdlib = set(sys.stdlib_module_names)
     src = Path(__file__).resolve().parents[1] / "src" / "library_hiroba"
     for path in ["ui.py", "_core.py", "_css.py", "_components.py", "_forms.py"]:
         tree = ast.parse((src / path).read_text(encoding="utf-8"))
@@ -95,8 +112,10 @@ def test_ui_stays_dependency_free():
             elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
                 names = [node.module.split(".")[0]]
             for name in names:
-                assert name in stdlib or name in {"IPython", "ipywidgets"}, (
-                    f"{path} が標準ライブラリ以外を import している: {name}"
+                assert name in UI_MAY_IMPORT, (
+                    f"{path} が、許していないものを import している: {name}"
+                    "（増やすなら tests/test_ai.py の UI_MAY_IMPORT と "
+                    "docs/PYHIROBA_INTEGRATION.md を更新すること）"
                 )
 
 
