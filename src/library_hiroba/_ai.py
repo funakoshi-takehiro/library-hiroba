@@ -16,7 +16,7 @@ PyHiroba は GitHub Pages で配信しているため COOP/COEP ヘッダを付�
 2つの経路
 ---------
 - PyHiroba（ブラウザ）… 本体が用意した ``js.pyhirobaAsk`` を通す。やり取りは JSON 文字列だけ
-- Colab など … ``transformers`` と ``torch`` を使う（``pip install library-hiroba[ai]``）
+- Colab など … ``transformers`` と ``torch`` を使う（``pip install "library-hiroba[ai]"``）
 
 入力した文章が外部に送られることはありません。通信はモデルを受け取るときだけです。
 
@@ -192,7 +192,7 @@ class Ai:
         except ImportError as error:
             raise ImportError(
                 "transformers と torch が必要です。次の行を先に実行してください:\n"
-                "    !pip install -q library-hiroba[ai]"
+                '    !pip install -q "library-hiroba[ai]"'
             ) from error
 
         device = 0 if torch.cuda.is_available() else -1
