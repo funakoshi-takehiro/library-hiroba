@@ -61,14 +61,42 @@ globalThis.pyhirobaAsk = async (kind, argsJson) => { /* … */ return resultJson
 
 ブラウザ側は同じモデルを精度違いで並べるため名前に `-q8` / `-q4` が付きますが、Colab 側にその区別はありません。両方を受け付け、**本体には必ずブラウザ側の名前を渡します**。
 
-| 利用者が書く名前 | 本体に渡る名前 | Colab で使う ID |
-|---|---|---|
-| `qwen05`（既定） | `qwen05-q8` | `Qwen/Qwen2.5-0.5B-Instruct` |
-| `qwen05-q4` | `qwen05-q4` | `Qwen/Qwen2.5-0.5B-Instruct` |
-| `qwen15` | `qwen15-q4` | `Qwen/Qwen2.5-1.5B-Instruct` |
-| `llmjp150m` | `llmjp150m-q4` | `llm-jp/llm-jp-3-150m-instruct3` |
+| 利用者が書く名前 | 本体に渡る名前 | 本体が読む ONNX | Colab で使う ID |
+|---|---|---|---|
+| `qwen05`（既定） | `qwen05-q8` | `onnx-community/Qwen2.5-0.5B-Instruct` | `Qwen/Qwen2.5-0.5B-Instruct` |
+| `qwen05-q4` | `qwen05-q4` | 同上（q4 の重み） | `Qwen/Qwen2.5-0.5B-Instruct` |
+| `qwen15` | `qwen15-q4` | `onnx-community/Qwen2.5-1.5B-Instruct` | `Qwen/Qwen2.5-1.5B-Instruct` |
+| `llmjp150m` | `llmjp150m-q4` | `onnx-community/llm-jp-3-150m-instruct2-ONNX` | `llm-jp/llm-jp-3-150m-instruct2` |
 
 精度まで指定されたときは、その指定をそのまま尊重して渡します。一覧に無い名前は本体に届く前に `ValueError` にします。
+
+**右の2列は同じモデルの別形式でなければいけません。** 本体が別の変換元を選ぶと、利用者は同じ名前を書いたのに環境ごとに違うモデルが動きます。取り違えを防ぐため、両方を `_ai.py` の `MODELS`（`browser_repo` と `colab_id`）に書き、名前が一致することをテストで確かめています（`tests/test_ai.py::test_both_paths_load_the_same_model`）。
+
+> `llmjp150m` が **instruct3 ではなく instruct2** なのは、ONNX に変換されているのが instruct2 だけだからです。Colab だけ instruct3 にすると上記のずれが起きます。150M では両者の差はほとんどないため、揃えるほうを採りました。
+
+### モデルを増やすとき
+
+読めるモデルの幅は**ブラウザ側で決まります**。Colab は Hugging Face のほぼ何でも読めますが、ブラウザ（transformers.js）は **ONNX に変換済みのものしか読めない**ためです。増やすときは次の順で確かめてください。
+
+1. ONNX 版があるか。`https://huggingface.co/models?other=onnx` を候補名で検索します
+2. 元の PyTorch 版があるか（Colab 用）
+3. 量子化した重みの大きさ。校内の回線で配れる範囲か
+4. ライセンス。学校で使える条件か
+
+**4つそろって初めて追加できます。** そろわないものを入れると「同じコードが両方で動く」が崩れます。
+
+ONNX 版が無いモデルをどうしても使いたい場合は、自分で変換して配布する必要があります。
+
+```bash
+pip install "optimum[onnxruntime]"
+optimum-cli export onnx --model llm-jp/llm-jp-3-440m-instruct3 --task text-generation-with-past out/
+```
+
+変換した重みは本体から取得できる場所に置いてください。この作業をしない限り、`MODELS` に足しても**ブラウザでは読み込みに失敗します**。
+
+#### LLM-jp の現状（2026-08 時点）
+
+`llm-jp-3` で ONNX 版が公開されているのは **150M の instruct2 だけ**です。440M・980M・1.8B・3.7B・13B と、instruct3 系にはいずれも変換版がありません。そのため、**上の変換を自分で行わない限り、LLM-jp を 150M より増やすことはできません**。
 
 ### `ai-models` を呼ばない理由
 

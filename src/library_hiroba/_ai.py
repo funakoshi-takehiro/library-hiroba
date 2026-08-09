@@ -37,10 +37,16 @@ __all__ = ["Ai", "ai"]
 #
 #   共通の名前（これを使うのが推奨）… qwen05 / qwen15 / llmjp150m
 #   ブラウザ固有の名前（そのまま通す）… qwen05-q8 / qwen05-q4 / qwen15-q4 / llmjp150m-q4
+#
+# ``colab_id`` と ``browser_repo`` は**同じモデルの別形式**でなければいけない。
+# 片方だけ新しい版に上げると、同じ名前を書いたのに環境で違うモデルが動く。
+# ブラウザは ONNX に変換されたものしか読めないので、選べる幅はそちらで決まる。
+# 増やせるかどうかの調べ方は docs/PYHIROBA_INTEGRATION.md の「モデルを増やす」に。
 MODELS = {
     "qwen05": {
         "label": "Qwen2.5 0.5B（日本語が使えます・おすすめ）",
         "colab_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "browser_repo": "onnx-community/Qwen2.5-0.5B-Instruct",
         "browser_key": "qwen05-q8",
         "browser_variants": ("qwen05-q8", "qwen05-q4"),
         "approx_mb": {"browser": 900, "colab": 1000},
@@ -48,13 +54,18 @@ MODELS = {
     "qwen15": {
         "label": "Qwen2.5 1.5B（日本語がより自然・重い）",
         "colab_id": "Qwen/Qwen2.5-1.5B-Instruct",
+        "browser_repo": "onnx-community/Qwen2.5-1.5B-Instruct",
         "browser_key": "qwen15-q4",
         "browser_variants": ("qwen15-q4",),
         "approx_mb": {"browser": 1600, "colab": 3100},
     },
     "llmjp150m": {
+        # instruct3 ではなく instruct2。ONNX に変換されているのが instruct2 だけで、
+        # Colab をこちらに合わせないと、同じ名前で環境ごとに別のモデルが動いてしまう。
+        # 150M では両者の差はほとんどなく、揃えるほうを採った。
         "label": "LLM-jp-3 150M（国産・とても軽い／文章は不自然です）",
-        "colab_id": "llm-jp/llm-jp-3-150m-instruct3",
+        "colab_id": "llm-jp/llm-jp-3-150m-instruct2",
+        "browser_repo": "onnx-community/llm-jp-3-150m-instruct2-ONNX",
         "browser_key": "llmjp150m-q4",
         "browser_variants": ("llmjp150m-q4",),
         "approx_mb": {"browser": 255, "colab": 600},

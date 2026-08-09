@@ -138,6 +138,44 @@ def test_unknown_model_is_rejected():
         _ai.resolve("gpt-9")
 
 
+def _bare_model_name(repo: str) -> str:
+    """配布元と ONNX の印を落として、モデル本体の名前だけにする。
+
+    ``Qwen/Qwen2.5-0.5B-Instruct`` も
+    ``onnx-community/Qwen2.5-0.5B-Instruct`` も ``qwen2.5-0.5b-instruct`` になる。
+    """
+    name = repo.split("/")[-1].lower()
+    for mark in ("-onnx", "_onnx"):
+        if name.endswith(mark):
+            name = name[: -len(mark)]
+    return name
+
+
+@pytest.mark.parametrize("name", sorted(_ai.MODELS))
+def test_both_paths_load_the_same_model(name):
+    """Colab とブラウザで、同じ名前から同じモデルが読まれること。
+
+    「同じコードが両方で動く」の中身。片方だけ版を上げると、利用者は同じ名前を
+    書いたのに違うモデルが動く。instruct3 と instruct2 を取り違えた実績がある
+    ので、名前の一致を機械で確かめる。
+    """
+    spec = _ai.MODELS[name]
+    colab = _bare_model_name(spec["colab_id"])
+    browser = _bare_model_name(spec["browser_repo"])
+    assert colab == browser, (
+        f"{name} が環境でずれています: Colab は {spec['colab_id']}、"
+        f"ブラウザは {spec['browser_repo']}"
+    )
+
+
+@pytest.mark.parametrize("name", sorted(_ai.MODELS))
+def test_every_model_records_where_it_comes_from(name):
+    """本体側が変換元を選び直せないよう、両方の配布元を必ず書いておく。"""
+    spec = _ai.MODELS[name]
+    assert "/" in spec["colab_id"], "Colab 側は 配布元/名前 の形で書くこと"
+    assert "/" in spec["browser_repo"], "ブラウザ側は 配布元/名前 の形で書くこと"
+
+
 def test_every_browser_variant_maps_to_a_base():
     """本体の一覧（qwen05-q8 / qwen05-q4 / qwen15-q4 / llmjp150m-q4）を全部受けられる。"""
     for key in ["qwen05-q8", "qwen05-q4", "qwen15-q4", "llmjp150m-q4"]:
