@@ -80,7 +80,7 @@ class Widget:
         return f'<div class="hui">\n{self._style_block()}\n{self.fragment()}\n</div>'
 
     def __repr__(self) -> str:
-        return f"<ui_hiroba.{type(self).__name__}>"
+        return f"<library_hiroba.{type(self).__name__}>"
 
 
 Item = Union[Widget, object]

@@ -3,15 +3,15 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "ui-hiroba"
+name = "library-hiroba"
 dynamic = ["version"]
-description = "Google Colab と PyHiroba で動く、教育向けの UI 表示ライブラリ"
+description = "Google Colab と PyHiroba で同じコードが動く、教育向けの UI と AI の道具"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Takehiro Funakoshi" }]
-keywords = ["jupyter", "colab", "education", "ui", "notebook", "pyodide", "widgets", "html"]
+keywords = ["jupyter", "colab", "education", "ui", "notebook", "pyodide", "widgets", "html", "llm"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Education",
@@ -31,20 +31,23 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/funakoshi-takehiro/ui-hiroba"
-Repository = "https://github.com/funakoshi-takehiro/ui-hiroba"
-Issues = "https://github.com/funakoshi-takehiro/ui-hiroba/issues"
-Changelog = "https://github.com/funakoshi-takehiro/ui-hiroba/releases"
+Homepage = "https://github.com/funakoshi-takehiro/library-hiroba"
+Repository = "https://github.com/funakoshi-takehiro/library-hiroba"
+Issues = "https://github.com/funakoshi-takehiro/library-hiroba/issues"
+Changelog = "https://github.com/funakoshi-takehiro/library-hiroba/releases"
 
 [project.optional-dependencies]
+# ai は Colab で言語モデルを動かすときだけ必要。既定では入れない
+# （ui だけを使う環境に torch を持ち込まないため）
+ai = ["transformers", "torch"]
 dev = ["pytest", "ruff>=0.16", "build", "twine", "nbformat"]
 gallery = ["playwright"]
 
 [tool.hatch.version]
-path = "src/ui_hiroba/__init__.py"
+path = "src/library_hiroba/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ui_hiroba"]
+packages = ["src/library_hiroba"]
 
 [tool.ruff]
 line-length = 100

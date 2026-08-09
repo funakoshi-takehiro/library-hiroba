@@ -11,7 +11,7 @@ import pytest
 from conftest import sample_widgets
 from sanitize_check import check_html
 
-import ui_hiroba as ui
+from library_hiroba import ui
 
 # XSS でよく使われるパターンを text 引数に注入する
 EVIL = '<script>alert(1)</script><img src=x onerror=alert(1)>"><iframe src="javascript:alert(1)"></iframe>'

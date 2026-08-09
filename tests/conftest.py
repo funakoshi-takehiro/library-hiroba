@@ -7,7 +7,7 @@ from pathlib import Path
 # pip install なしでも src レイアウトのパッケージを import できるようにする
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-import ui_hiroba as ui
+from library_hiroba import ui
 
 
 def has_rule(html: str, selector: str) -> bool:

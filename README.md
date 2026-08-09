@@ -1,11 +1,16 @@
-# ui-hiroba
+# library-hiroba
 
-Google Colab と PyHiroba で動く、教育向けの UI 表示ライブラリです。カード・クイズ・進捗バーといった部品を、ノートブックのセル出力にそのまま表示します。
+Google Colab と PyHiroba で、同じコードが同じように動く教育向けのライブラリです。入口は2つあります。
+
+| 入口 | できること |
+|---|---|
+| `ui` | カード・クイズ・進捗バーといった部品を、ノートブックのセル出力にそのまま表示します |
+| `ai` | 小さな言語モデルを、その場（ブラウザまたはノートブック）で動かします |
 
 [PyHiroba](https://pyhiroba.weblab.t.u-tokyo.ac.jp/) は、インストールも登録も必要とせず、ブラウザだけで Python を学べる、日本の学校現場向けの学習環境です。
 
 ```python
-import ui_hiroba as ui
+from library_hiroba import ai, ui
 
 ui.card("今日の目標", "for文を使って、九九の表を作ってみよう！")
 ```
@@ -33,7 +38,7 @@ CSS はその部品の内側だけに適用されるため、クラス名を気�
 |---|---|
 | 動作環境 | セル最後の式を `_repr_html_()` で表示する共通のしくみに乗るため、Colab と PyHiroba で表示が一致します |
 | 実装方式 | 表示も操作も HTML と CSS だけで完結します（クイズの正誤表示は `:checked`、開閉は `<details>`） |
-| 依存関係 | 純 Python で依存ライブラリはありません。配布物は `py3-none-any` の wheel で、Colab の pip でも Pyodide の micropip でも取得できます |
+| 依存関係 | `ui` は純 Python で依存ライブラリがありません。配布物は `py3-none-any` の wheel で、Colab の pip でも Pyodide の micropip でも取得できます（`ai` を Colab で使うときだけ追加の依存が要ります） |
 | 見た目 | 配色・書体・角丸を PyHiroba 本体のデザインに合わせています |
 | 配慮 | 配色は WCAG 4.5:1 以上を確認済みで、アニメーションは `prefers-reduced-motion` に従います |
 
@@ -42,10 +47,16 @@ CSS はその部品の内側だけに適用されるため、クラス名を気�
 Google Colab と Jupyter:
 
 ```
-%pip install ui-hiroba
+%pip install library-hiroba
 ```
 
-PyHiroba では、同梱されていれば `import ui_hiroba` だけで使えます。同梱前の環境では `!pip install ui-hiroba` を実行すると micropip が PyPI から取得します。
+Colab で `ai` も使うときは、追加の依存（transformers と torch）を含めます。
+
+```
+%pip install "library-hiroba[ai]"
+```
+
+PyHiroba では、同梱されていれば `import library_hiroba` だけで使えます。`ai` の実行はブラウザ側の経路を使うので、追加のインストールは要りません。同梱前の環境では `!pip install library-hiroba` を実行すると micropip が PyPI から取得します。
 
 ## 部品一覧
 
@@ -95,7 +106,7 @@ ui.form(ask,
 |---|---|
 | Colab・Jupyter（ipywidgets あり） | テキスト欄とボタンの対話 UI。押すたびに関数が呼ばれます |
 | ipywidgets が無い環境 | `input()` で順に聞いて、結果を表示します |
-| PyHiroba | HTML のフォームを表示します。値を受け取るには本体側の対応が必要です（[`docs/PYHIROBA_FORMS.md`](https://github.com/funakoshi-takehiro/ui-hiroba/blob/main/docs/PYHIROBA_FORMS.md) に設計案があります） |
+| PyHiroba | HTML のフォームを表示します。値を受け取るには本体側の対応が必要です（[`docs/PYHIROBA_FORMS.md`](https://github.com/funakoshi-takehiro/library-hiroba/blob/main/docs/PYHIROBA_FORMS.md) に設計案があります） |
 
 先生が書くコードは1つで済み、環境ごとの切り替えは不要です。
 
@@ -116,6 +127,72 @@ def ask(question):
 ui.form(ask, ui.field("question", label="質問"),
         submit_label="送信", clear_on_submit=True)
 ```
+
+## AI（小さな言語モデル）
+
+`ai` は、小さな言語モデルをその場で動かします。メソッドは3つだけです。
+
+```python
+from library_hiroba import ai
+
+await ai.models()                  # 選べるモデルの一覧
+await ai.load()                    # モデルを読み込む（初回だけ時間がかかります）
+print(await ai.ask("日本の四季について、2行で書いて"))
+```
+
+`await` が必要です。ノートブック（Colab / Jupyter / PyHiroba）では、セルの中にそのまま `await` を書けます。PyHiroba は GitHub Pages 配信のため `SharedArrayBuffer` を使った同期待ちができず、ブラウザ側は待つ形にせざるを得ません。Colab 側は待つ必要がありませんが、**同じコードが両方で動く**ことを優先して形を揃えています。
+
+`ask()` には `max_tokens` を渡せます（既定は 256）。
+
+```python
+print(await ai.ask("俳句を1つ作って", max_tokens=64))
+```
+
+### 動く場所
+
+| 環境 | 動かし方 | 用意するもの |
+|---|---|---|
+| PyHiroba | ブラウザの中で動きます（本体が用意した経路を使います） | なし |
+| Colab・Jupyter | `transformers` と `torch` で動きます | `%pip install "library-hiroba[ai]"` |
+
+どちらの経路でも、入力した文章が外部に送られることはありません。通信が起きるのはモデルを受け取るときだけです。
+
+### 選べるモデル
+
+`load()` に名前を渡すとモデルを選べます。
+
+```python
+await ai.load("llmjp150m")
+```
+
+| 名前 | 内容 | 目安の通信量（ブラウザ／Colab） |
+|---|---|---|
+| `qwen05`（既定） | Qwen2.5 0.5B。日本語が使えます | 約 900MB ／ 約 1.0GB |
+| `qwen15` | Qwen2.5 1.5B。日本語がより自然ですが重いです | 約 1.6GB ／ 約 3.1GB |
+| `llmjp150m` | LLM-jp-3 150M。国産でとても軽い一方、文章は不自然です | 約 255MB ／ 約 600MB |
+
+ブラウザ側は同じモデルを精度違いで並べるため `qwen05-q8` のように末尾が付いた名前も使えます。精度まで指定したいときはそちらを、そうでなければ上の共通の名前を使ってください。共通の名前はどちらの環境でも通ります。
+
+### チャットとして表示する
+
+`ui.form()`・`ui.chat()` と組み合わせると、1つのセルで対話ができます。
+
+```python
+history = []
+
+async def ask(question):
+    history.append({"role": "user", "content": question})
+    history.append({"role": "assistant", "content": await ai.ask(question)})
+    return ui.chat(history, names={"user": "あなた", "assistant": "AI"})
+
+await ai.load()
+ui.form(ask, ui.field("question", label="質問"),
+        submit_label="送信", clear_on_submit=True)
+```
+
+`handler` は `async def` で書けます。`ui.form()` は返り値が `await` の要るものかどうかを見て、必要なら待ってから表示します。入力を Python に戻す経路は環境によって変わるため、この組み合わせが動くのは今のところ Colab・Jupyter です（PyHiroba は本体側の対応待ちです）。
+
+モデルのライセンスは配布元をご確認ください（既定の Qwen2.5 は Apache-2.0）。
 
 ## デザイン
 
@@ -153,13 +230,15 @@ ui.html('<div class="box">ヒント</div>',
 | 面 | `--hui-paper` / `--hui-bg-2` / `--hui-line` |
 | 形 | `--hui-radius` / `--hui-radius-sm` / `--hui-shadow` |
 
-書体は Google Fonts から読み込みます。オフラインや閉域網では `system-ui` に切り替わるだけで、表示は保たれます。外部との通信を完全になくす場合は、`src/ui_hiroba/_css.py` の `FONT_IMPORT` を空文字にします。
+書体は Google Fonts から読み込みます。オフラインや閉域網では `system-ui` に切り替わるだけで、表示は保たれます。外部との通信を完全になくす場合は、`src/library_hiroba/_css.py` の `FONT_IMPORT` を空文字にします。
 
 ## しくみと範囲
 
 各部品は、必要な CSS を同梱した自己完結の HTML を返します。同じ CSS が何度出力されても表示は変わりません。渡したテキストはすべて HTML エスケープされ、改行は `<br>` になります。エスケープしない経路は `ui.html()` だけです。
 
 部品の表示と CSS による操作は、どの環境でも同じように動きます。入力を Python に戻す `ui.form()` は環境によって経路が変わり、PyHiroba では本体側の対応を待っています。
+
+`ai` も環境によって経路が変わります。PyHiroba では本体が用意した経路を通し、Colab では `transformers` を使います。書き方は同じですが、動くモデルの実体と読み込みにかかる時間は環境で違います。`ui` は純 Python のままで、`ai` を使わないかぎり追加の依存は読み込まれません。
 
 クイズの正解は HTML の class として含まれるため、成績評価ではなく学習用の自己チェックに向いています。
 
@@ -169,10 +248,12 @@ ui.html('<div class="box">ヒント</div>',
 pip install -e ".[dev]"
 ruff check src tests tools && pytest        # lint とテスト
 python tools/build_gallery.py --shots       # 全部品のギャラリーとスクリーンショットを生成
+python tools/check_ai_colab.py              # ai の Colab 経路を実際に動かす（[ai] が必要）
 ```
 
-リリース手順は [`docs/RELEASING.md`](https://github.com/funakoshi-takehiro/ui-hiroba/blob/main/docs/RELEASING.md) を参照してください。
+- リリース手順: [`docs/RELEASING.md`](https://github.com/funakoshi-takehiro/library-hiroba/blob/main/docs/RELEASING.md)
+- PyHiroba に同梱するときの取り決め（ファイル一覧・`ai` の受け渡し）: [`docs/PYHIROBA_INTEGRATION.md`](https://github.com/funakoshi-takehiro/library-hiroba/blob/main/docs/PYHIROBA_INTEGRATION.md)
 
 ## ライセンス
 
-[MIT](https://github.com/funakoshi-takehiro/ui-hiroba/blob/main/LICENSE)
+[MIT](https://github.com/funakoshi-takehiro/library-hiroba/blob/main/LICENSE)

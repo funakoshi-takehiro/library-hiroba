@@ -1,4 +1,4 @@
-"""ui_hiroba の CSS 定義。
+"""library_hiroba の CSS 定義。
 
 デザインは PyHiroba 本体（css/style.css の V3 デザイン）に合わせている:
 ティールのブランドカラー、Zen Kaku Gothic New、角丸14px、ソフトシャドウ、

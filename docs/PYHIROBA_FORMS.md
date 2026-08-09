@@ -1,6 +1,6 @@
 # PyHiroba で入力を Python に戻すための設計案
 
-`ui.form()` は Colab では動きますが、PyHiroba では入力を受け取れません。この文書は、PyHiroba 本体に何を足せば動くようになるかをまとめたものです。ui-hiroba 側はすでに、本体が対応した時点でそのまま動く形の HTML を出しています。
+`ui.form()` は Colab では動きますが、PyHiroba では入力を受け取れません。この文書は、PyHiroba 本体に何を足せば動くようになるかをまとめたものです。library-hiroba 側はすでに、本体が対応した時点でそのまま動く形の HTML を出しています。
 
 これは提案であり、採用するかどうかは PyHiroba 側の判断です。
 
@@ -48,7 +48,7 @@ DOMPurify 3.4.12 に、PyHiroba の `sanitizeHtml()` と同じ設定で通した
 
 つまり **サニタイザの設定を緩める必要はありません**。禁止しているものは禁止したまま実現できます。
 
-## 4. ui-hiroba が出す HTML の約束
+## 4. library-hiroba が出す HTML の約束
 
 `ui.form()` は次の目印を付けた HTML を出します。本体はこれを手がかりに動きます。
 
@@ -74,16 +74,26 @@ DOMPurify 3.4.12 に、PyHiroba の `sanitizeHtml()` と同じ設定で通した
 
 ### 5-1. ワーカー側（`js/pyodide-worker.js`）
 
-フォーム ID と Python の関数を対応づける入れ物を用意し、`submit` のメッセージで呼び出します。
+フォーム ID から Python 側のフォームを引き、`submit` のメッセージで呼び出します。引く口は library-hiroba が用意します（`library_hiroba.ui.get_form(form_id)`。見つからなければ `None`）。
 
-```js
-// メインスレッドから {type:'hui-submit', formId, values} が届いたとき
-const form = pyodide.globals.get('__hui_forms__')?.get(formId);
-const html = form ? form.submit(pyodide.toPy(values))._repr_html_() : null;
-postMessage({type:'hui-result', formId, html});
+```python
+# ワーカーの中で（Python 側）
+import inspect
+
+from library_hiroba import ui
+
+async def hui_submit(form_id, values):
+    form = ui.get_form(form_id)
+    if form is None:
+        return None
+    result = form.submit(**values)
+    # handler が async def のときは、返り値が待つもの（awaitable）になる
+    if inspect.isawaitable(result):
+        result = await result
+    return result._repr_html_()
 ```
 
-Python 側の登録先は ui-hiroba が用意します。本体は「`__hui_forms__` という辞書から ID で引いて `submit(**values)` を呼ぶ」とだけ決めてください。
+**`await` が要る点にご注意ください。** `ai.ask()` を呼ぶ handler は `async def` で書くことになり、`submit()` の返り値はコルーチンになります。await せずに `_repr_html_()` を呼ぶと失敗します。
 
 ### 5-2. メインスレッド側（`js/app.exec.js`）
 
@@ -120,8 +130,9 @@ function bindHuiForms(container) {
 
 ## 7. 決めていただきたいこと
 
-1. `__hui_forms__` という名前でよいか（本体側で好みの名前があればそちらに合わせます）
+1. 引く口を `library_hiroba.ui.get_form(form_id)` にするか、本体側で好みの名前（`__hui_forms__` のような辞書）に合わせるか
 2. 結果の差し替え先を `data-hui-output` にするか、セルの出力全体を描き直すか
 3. フォームの登録をいつ捨てるか（セル削除時、再実行時、ノートブックを閉じたとき）
+4. `submit()` の返り値が awaitable のときに await する処理を、本体のどこに置くか（フォームから `ai` を呼ぶ教材で必要になります）
 
-これらが決まれば、ui-hiroba 側は登録の口を合わせるだけで対応できます。
+これらが決まれば、library-hiroba 側は登録の口を合わせるだけで対応できます。

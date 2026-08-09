@@ -1,8 +1,8 @@
-"""ui_hiroba — Google Colab と PyHiroba で動く、教育向けの UI 表示ライブラリ。
+"""library_hiroba.ui — ノートブックに UI 部品を表示する。
 
 使い方（セル最後の式に置くと表示される）::
 
-    import ui_hiroba as ui
+    from library_hiroba import ui
 
     ui.card("今日の目標", "for文を使って、九九の表を作ってみよう！")
 
@@ -38,11 +38,8 @@ from ._components import (
 from ._core import Widget, show
 from ._forms import field, form, get_form
 
-__version__ = "0.2.1"
-
 __all__ = [
     "Widget",
-    "__version__",
     "alert",
     "badge",
     "card",

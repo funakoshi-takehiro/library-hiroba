@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 from collections.abc import Sequence
 from typing import Callable, Union
 
@@ -131,6 +133,41 @@ def as_field(item: FieldLike) -> Field:
     return item if isinstance(item, Field) else Field(str(item))
 
 
+def display_result(result: object, into: object = None) -> None:
+    """``handler`` の返り値を表示する。
+
+    ``ai.ask()`` を呼ぶ handler は ``async def`` で書くことになり、返り値は
+    ``await`` してからでないと中身が取れない。そのまま表示するとコルーチン
+    オブジェクトが出てしまうため、待ってから表示する。
+
+    ``into`` に ipywidgets の Output を渡すと、その中に表示する（待っている
+    あいだにセルの実行が終わっても、結果がフォームの下に出るようにするため）。
+    """
+    from IPython.display import display
+
+    if not inspect.isawaitable(result):
+        display(result)
+        return
+
+    async def wait_then_show() -> None:
+        # await は Output の中で行う。handler が途中で失敗したときに、
+        # その内容がフォームの下にそのまま表示されるようにするため。
+        if into is None:
+            display(await result)
+        else:
+            with into:
+                display(await result)
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # ノートブックの外（素の Python）。回っているループが無いので自分で回す
+        asyncio.run(wait_then_show())
+    else:
+        # ノートブックの中。ループに載せて、終わったときに表示する
+        asyncio.ensure_future(wait_then_show())  # noqa: RUF006 — 表示したら終わる使い捨て
+
+
 class Form(Widget):
     """入力欄とボタンを出し、押されたら ``handler`` を呼ぶ部品。"""
 
@@ -239,7 +276,7 @@ class Form(Widget):
                     controls[name].value = ""
             with output:
                 clear_output(wait=True)
-                display(self.handler(**values))
+                display_result(self.handler(**values), into=output)
 
         button.on_click(on_click)
         header = [widgets.HTML(f"<b>{esc(self.title)}</b>")] if self.title is not None else []
@@ -248,16 +285,17 @@ class Form(Widget):
 
     def _run_with_input(self) -> None:
         """``input()`` で順番に聞いて、結果を表示する。"""
-        from IPython.display import display
-
         values = {field.name: field.ask_via_input() for field in self.fields}
-        display(self.handler(**values))
+        display_result(self.handler(**values))
 
     def submit(self, **values: object) -> object:
         """入力値を渡して ``handler`` を呼ぶ。
 
         PyHiroba 本体が値を受け取ったときに呼ぶ入口でもある。
         自分でテストするときにも使える。
+
+        ``handler`` が ``async def`` のときは、返り値が待つもの（awaitable）に
+        なる。呼び出し側で ``await`` してから表示すること。
         """
         missing = [f.name for f in self.fields if f.name not in values]
         if missing:

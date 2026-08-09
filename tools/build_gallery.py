@@ -24,8 +24,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-import ui_hiroba as ui  # noqa: E402
-from ui_hiroba._css import FONT_IMPORT  # noqa: E402
+from library_hiroba import ui  # noqa: E402
+from library_hiroba._css import FONT_IMPORT  # noqa: E402
 
 OUT = ROOT / "tools" / "out"
 
@@ -174,7 +174,7 @@ def page(title: str, body_style: str, html_attr: str = "") -> str:
 <html{html_attr}>
 <head>
 <meta charset="utf-8">
-<title>ui-hiroba gallery — {title}</title>
+<title>library-hiroba gallery — {title}</title>
 <link rel="stylesheet" href="fonts.css">
 <style>
   body {{ {body_style} font-family: 'Zen Kaku Gothic New', system-ui, sans-serif;
@@ -186,7 +186,7 @@ def page(title: str, body_style: str, html_attr: str = "") -> str:
 </style>
 </head>
 <body>
-<h1>ui-hiroba gallery — {title}</h1>
+<h1>library-hiroba gallery — {title}</h1>
 {joined}
 </body>
 </html>

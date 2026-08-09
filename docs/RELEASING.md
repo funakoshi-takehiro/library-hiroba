@@ -4,6 +4,9 @@ GitHub Actions と PyPI が直接信頼関係を結ぶ Trusted Publishing のし
 
 準備は最初の1回だけです。2回目以降はタグを打つだけで公開されます。
 
+> **`ui-hiroba` から改名したときの注意**
+> Trusted Publisher はプロジェクト名ごとの設定です。`ui-hiroba` 用に登録したものは `library-hiroba` には効きません。手順2をもう一度、新しい名前で行ってください。GitHub のリポジトリ名を変えた場合は、手順2の Repository name も新しい名前に合わせます（古い名前でもリダイレクトで push はできますが、Trusted Publishing の照合は名前が一致している必要があります）。
+
 ---
 
 # 最初の1回だけ行う準備
@@ -28,9 +31,9 @@ GitHub Actions と PyPI が直接信頼関係を結ぶ Trusted Publishing のし
 
    | 入力欄 | 入力する値 |
    |---|---|
-   | PyPI Project Name | `ui-hiroba` |
+   | PyPI Project Name | `library-hiroba` |
    | Owner | `funakoshi-takehiro` |
-   | Repository name | `ui-hiroba` |
+   | Repository name | `library-hiroba` |
    | Workflow name | `release.yml` |
    | Environment name | `pypi` |
 
@@ -40,7 +43,7 @@ GitHub Actions と PyPI が直接信頼関係を結ぶ Trusted Publishing のし
 
 ## 手順3: GitHub に環境「pypi」を作る
 
-https://github.com/funakoshi-takehiro/ui-hiroba/settings/environments で「New environment」を押し、手順2と同じ `pypi` という名前で作成します。保護ルールの設定は不要です。
+https://github.com/funakoshi-takehiro/library-hiroba/settings/environments で「New environment」を押し、手順2と同じ `pypi` という名前で作成します。保護ルールの設定は不要です。
 
 ---
 
@@ -48,7 +51,7 @@ https://github.com/funakoshi-takehiro/ui-hiroba/settings/environments で「New 
 
 ## 手順A: バージョン番号を上げる
 
-`src/ui_hiroba/__init__.py` の `__version__` を書き換え、main にコミットします。
+`src/library_hiroba/__init__.py` の `__version__` を書き換え、main にコミットします。
 
 | 変更内容 | 例 |
 |---|---|
@@ -71,9 +74,9 @@ git push origin v0.1.0
 
 ## 手順C: 結果を確認する
 
-https://github.com/funakoshi-takehiro/ui-hiroba/actions で「Release to PyPI」が動きます（1〜3分）。ワークフローはタグと `__version__` の照合、lint とテスト、`twine check` を通してから公開します。
+https://github.com/funakoshi-takehiro/library-hiroba/actions で「Release to PyPI」が動きます（1〜3分）。ワークフローはタグと `__version__` の照合、lint とテスト、`twine check` を通してから公開します。
 
-緑のチェックが付いたら、https://pypi.org/project/ui-hiroba/ と、Colab での `!pip install ui-hiroba` を確認します。反映には数分かかることがあります。
+緑のチェックが付いたら、https://pypi.org/project/library-hiroba/ と、Colab での `!pip install library-hiroba` を確認します。反映には数分かかることがあります。
 
 ---
 
@@ -106,10 +109,10 @@ PyPI の画面で進めなくなった場合は、次を確認してください
 
 # 補足
 
-公開されるのは `python -m build` が作る2つのファイルだけです。テストやノートブックは含まれません。
+公開されるのは `python -m build` が作る2つのファイルだけです。
 
-- `ui_hiroba-0.1.0-py3-none-any.whl` — 実際にインストールされる本体
-- `ui_hiroba-0.1.0.tar.gz` — ソース一式
+- `library_hiroba-0.1.0-py3-none-any.whl` — 実際にインストールされる本体。`src/library_hiroba/` の中身だけが入ります
+- `library_hiroba-0.1.0.tar.gz` — ソース一式。テスト・ノートブック・ワークフローも含みます
 
 手元で確認する場合は次を実行します。
 

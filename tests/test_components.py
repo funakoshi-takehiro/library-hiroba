@@ -5,13 +5,14 @@ import re
 import pytest
 from conftest import has_rule
 
-import ui_hiroba as ui
+import library_hiroba
+from library_hiroba import ui
 
 
 def test_version_is_well_formed():
     # 具体的な番号は書かない（リリースのたびにテストを直す必要がなくなる）。
     # 公開ワークフローが、この値とタグの一致を別途検証している。
-    assert re.fullmatch(r"\d+\.\d+\.\d+", ui.__version__), ui.__version__
+    assert re.fullmatch(r"\d+\.\d+\.\d+", library_hiroba.__version__)
 
 
 # --- card / alert -----------------------------------------------------------
@@ -372,7 +373,7 @@ def test_table_headers_have_scope():
 
 def test_css_is_minified_but_intact():
     """出力ごとに CSS を同梱するため縮める。意味は変えない（W1）。"""
-    from ui_hiroba._css import BASE_CSS
+    from library_hiroba._css import BASE_CSS
 
     assert "\n  " not in BASE_CSS  # 余白が落ちている
     for token in ("#028DAE", "#35aecb", "Zen Kaku Gothic New", '[data-theme="dark"]'):

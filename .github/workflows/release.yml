@@ -20,11 +20,11 @@ jobs:
           TAG="${GITHUB_REF_NAME#v}"
           VERSION="$(python -c 'import re,pathlib;
           print(re.search(r"__version__ = \"([^\"]+)\"",
-          pathlib.Path("src/ui_hiroba/__init__.py").read_text()).group(1))')"
+          pathlib.Path("src/library_hiroba/__init__.py").read_text()).group(1))')"
           echo "tag=$TAG  __version__=$VERSION"
           if [ "$TAG" != "$VERSION" ]; then
             echo "::error::タグ v$TAG と __version__ $VERSION が一致しません。" \
-                 "src/ui_hiroba/__init__.py を更新するか、タグを打ち直してください。"
+                 "src/library_hiroba/__init__.py を更新するか、タグを打ち直してください。"
             exit 1
           fi
 
@@ -50,7 +50,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/project/ui-hiroba/
+      url: https://pypi.org/project/library-hiroba/
     permissions:
       id-token: write  # PyPI Trusted Publishing (OIDC)
     steps:

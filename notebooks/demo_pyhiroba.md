@@ -1,15 +1,15 @@
-# ui-hiroba デモ（PyHiroba 用セル一覧）
+# library-hiroba デモ（PyHiroba 用セル一覧）
 
 [PyHiroba](https://pyhiroba.weblab.t.u-tokyo.ac.jp/) のノートブックに、以下のコードブロックを1つずつセルとして貼り付けて実行してください。部品はセル最後の式に置くと表示されます。
 
-ui-hiroba が同梱されていれば `import` だけで使えます。同梱前の環境では、最初に `!pip install ui-hiroba` を実行してください。
+library-hiroba が同梱されていれば `import` だけで使えます。同梱前の環境では、最初に `!pip install library-hiroba` を実行してください。
 
 ## セル1: インポート
 
 ```python
-import ui_hiroba as ui
+from library_hiroba import ui
 
-ui.card("ui-hiroba へようこそ", "このカードが表示されたら準備OK！")
+ui.card("library-hiroba へようこそ", "このカードが表示されたら準備OK！")
 ```
 
 ## セル2: 説明カード
@@ -96,6 +96,24 @@ ui.html("""
 b { color: var(--hui-accent-ink); }
 """)
 ```
+
+## セル11: AI（本体が対応している環境のみ）
+
+`ai` はブラウザの中で小さな言語モデルを動かします。PyHiroba 本体の受け渡し経路（`js.pyhirobaAsk`）が用意されている環境でだけ動きます。
+
+```python
+from library_hiroba import ai
+
+await ai.models()
+```
+
+```python
+# 初回はモデルの取得に時間がかかります（llmjp150m で 255MB 前後）
+print(await ai.load("llmjp150m"))
+print(await ai.ask("日本の四季について、2行で書いて"))
+```
+
+Colab でも同じコードが動きます（そちらは `transformers` を使います）。
 
 ## 確認ポイント
 

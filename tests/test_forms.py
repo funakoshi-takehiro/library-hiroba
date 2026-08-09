@@ -6,13 +6,40 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import types
 
 import pytest
 from sanitize_check import check_html
 
-import ui_hiroba as ui
+from library_hiroba import ui
+
+
+def fake_ipywidgets(monkeypatch):
+    """ipywidgets の代役を入れ、その module を返す。"""
+
+    class FakeWidget:
+        def __init__(self, **kwargs):
+            self.value = kwargs.get("value", "")
+            self.kwargs = kwargs
+            self.fn = None
+
+        def on_click(self, fn):
+            self.fn = fn
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    fake = types.ModuleType("ipywidgets")
+    for name in ("Text", "Textarea", "FloatText", "Dropdown", "Button", "Output", "HTML"):
+        setattr(fake, name, FakeWidget)
+    fake.VBox = lambda children: {"vbox": list(children)}
+    monkeypatch.setitem(sys.modules, "ipywidgets", fake)
+    return fake
 
 
 def make_form(**kwargs):
@@ -135,32 +162,12 @@ def test_falls_back_to_input_without_ipywidgets(fake_ipython, monkeypatch):
 
 
 def test_uses_ipywidgets_when_available(fake_ipython, monkeypatch):
-    clicked = {}
-
-    class FakeWidget:
-        def __init__(self, **kwargs):
-            self.value = kwargs.get("value", "")
-            self.kwargs = kwargs
-
-        def on_click(self, fn):
-            clicked["fn"] = fn
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-    fake = types.ModuleType("ipywidgets")
-    for name in ("Text", "Textarea", "FloatText", "Dropdown", "Button", "Output", "HTML"):
-        setattr(fake, name, FakeWidget)
-    fake.VBox = lambda children: {"vbox": children}
-    monkeypatch.setitem(sys.modules, "ipywidgets", fake)
-
+    fake_ipywidgets(monkeypatch)
     make_form()._ipython_display_()
     assert fake_ipython.displayed and "vbox" in fake_ipython.displayed[0]
     # ボタンが押されたときに handler が呼ばれ、結果が表示されること
-    clicked["fn"](None)
+    button = fake_ipython.displayed[0]["vbox"][1]
+    button.fn(None)
     assert any(isinstance(x, ui.Widget) for x in fake_ipython.displayed)
 
 
@@ -196,7 +203,7 @@ def test_unknown_form_id_returns_none():
 
 
 def test_registry_does_not_grow_without_bound():
-    from ui_hiroba import _forms
+    from library_hiroba import _forms
 
     for _ in range(_forms._REGISTRY_LIMIT + 20):
         make_form()._repr_html_()
@@ -204,26 +211,7 @@ def test_registry_does_not_grow_without_bound():
 
 
 def test_clear_on_submit_empties_text_fields(fake_ipython, monkeypatch):
-    class FakeWidget:
-        def __init__(self, **kwargs):
-            self.value = kwargs.get("value", "")
-            self.fn = None
-
-        def on_click(self, fn):
-            self.fn = fn
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-    fake = types.ModuleType("ipywidgets")
-    for name in ("Text", "Textarea", "FloatText", "Dropdown", "Button", "Output", "HTML"):
-        setattr(fake, name, FakeWidget)
-    fake.VBox = lambda children: {"vbox": list(children)}
-    monkeypatch.setitem(sys.modules, "ipywidgets", fake)
-
+    fake_ipywidgets(monkeypatch)
     ui.form(lambda question: ui.card(question), "question", clear_on_submit=True)._ipython_display_()
     children = fake_ipython.displayed[0]["vbox"]
     text_box, button = children[0], children[1]
@@ -234,26 +222,7 @@ def test_clear_on_submit_empties_text_fields(fake_ipython, monkeypatch):
 
 
 def test_values_are_kept_when_clear_on_submit_is_off(fake_ipython, monkeypatch):
-    class FakeWidget:
-        def __init__(self, **kwargs):
-            self.value = kwargs.get("value", "")
-            self.fn = None
-
-        def on_click(self, fn):
-            self.fn = fn
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-    fake = types.ModuleType("ipywidgets")
-    for name in ("Text", "Textarea", "FloatText", "Dropdown", "Button", "Output", "HTML"):
-        setattr(fake, name, FakeWidget)
-    fake.VBox = lambda children: {"vbox": list(children)}
-    monkeypatch.setitem(sys.modules, "ipywidgets", fake)
-
+    fake_ipywidgets(monkeypatch)
     ui.form(lambda question: ui.card(question), "question")._ipython_display_()
     children = fake_ipython.displayed[0]["vbox"]
     text_box, button = children[0], children[1]
@@ -261,6 +230,74 @@ def test_values_are_kept_when_clear_on_submit_is_off(fake_ipython, monkeypatch):
     text_box.value = "そのまま残る"
     button.fn(None)
     assert text_box.value == "そのまま残る"
+
+
+# --- async な handler（ai.ask を呼ぶ場合） -----------------------------------
+
+
+def make_async_form(**kwargs):
+    async def handler(question):
+        await asyncio.sleep(0)  # ai.ask() のように、待つ処理が入る
+        return ui.card("答え", question)
+
+    return ui.form(handler, ui.field("question", label="質問"), **kwargs)
+
+
+def test_async_handler_is_awaited_on_the_input_path(fake_ipython, monkeypatch):
+    monkeypatch.setitem(sys.modules, "ipywidgets", None)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "スマホは持っていっていい？")
+    make_async_form()._ipython_display_()
+    # コルーチンのままではなく、待った結果が表示される
+    assert len(fake_ipython.displayed) == 1
+    shown = fake_ipython.displayed[0]
+    assert isinstance(shown, ui.Widget)
+    assert "スマホは持っていっていい？" in shown._repr_html_()
+
+
+def test_async_handler_is_awaited_on_the_ipywidgets_path(fake_ipython, monkeypatch):
+    fake_ipywidgets(monkeypatch)
+    make_async_form()._ipython_display_()
+    children = fake_ipython.displayed[0]["vbox"]
+    text_box, button = children[0], children[1]
+    text_box.value = "2の8乗は？"
+    button.fn(None)
+    widgets_shown = [x for x in fake_ipython.displayed if isinstance(x, ui.Widget)]
+    assert widgets_shown and "2の8乗は？" in widgets_shown[-1]._repr_html_()
+
+
+def test_async_handler_is_scheduled_when_a_loop_is_running(fake_ipython):
+    """ノートブックの中（ループが回っている）では、ループに載せて後から表示する。"""
+    from library_hiroba._forms import display_result
+
+    async def handler():
+        await asyncio.sleep(0)
+        return ui.card("答え", "あとから届く")
+
+    async def main():
+        display_result(handler())
+        assert fake_ipython.displayed == []  # この時点ではまだ待っている
+        await asyncio.sleep(0.05)  # ループに順番をゆずる
+        assert len(fake_ipython.displayed) == 1
+        assert "あとから届く" in fake_ipython.displayed[0]._repr_html_()
+
+    asyncio.run(main())
+
+
+def test_sync_handler_is_still_displayed_directly(fake_ipython):
+    from library_hiroba._forms import display_result
+
+    card = ui.card("答え", "すぐ出る")
+    display_result(card)
+    assert fake_ipython.displayed == [card]
+
+
+def test_submit_returns_the_awaitable_for_the_host():
+    """PyHiroba 本体は、返り値が待つものなら await してから表示する。"""
+    f = make_async_form()
+    f._repr_html_()
+    result = ui.get_form(f.form_id).submit(question="質問")
+    assert asyncio.iscoroutine(result)
+    assert "質問" in asyncio.run(result)._repr_html_()
 
 
 # --- 監査で見つかった不具合の再発防止 ---------------------------------------

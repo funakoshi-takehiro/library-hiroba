@@ -13,9 +13,13 @@ from pathlib import Path
 import pytest
 from sanitize_check import check_html
 
-import ui_hiroba as ui
+from library_hiroba import ui
 
 NOTEBOOKS = sorted((Path(__file__).resolve().parents[1] / "notebooks").glob("*.ipynb"))
+
+# ai を使うノートブックは、動かすとモデル（数百 MB〜）の取得が始まるため実行しない。
+# 実際に load → ask を通して確かめる手順は tools/check_ai_colab.py にある。
+NOT_RUN = {"demo_ai.ipynb"}
 
 
 def code_cells(path: Path) -> list[tuple[str, str]]:
@@ -35,8 +39,22 @@ def code_cells(path: Path) -> list[tuple[str, str]]:
 
 
 @pytest.mark.parametrize("notebook", NOTEBOOKS, ids=lambda p: p.name)
+def test_notebook_cells_compile(notebook):
+    """実行しないノートブックも、少なくとも構文は壊れていないこと。
+
+    セルの中の ``await``（``ai`` を呼ぶセル）はノートブックでは書けるので、
+    同じ条件（トップレベルの await を許す）でコンパイルする。
+    """
+    assert NOTEBOOKS, "notebooks/ に .ipynb が見つかりません"
+    for cell_id, source in code_cells(notebook):
+        compile(source, cell_id, "exec", flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT)
+
+
+@pytest.mark.parametrize("notebook", NOTEBOOKS, ids=lambda p: p.name)
 def test_notebook_cells_run_and_render_safely(notebook):
     assert NOTEBOOKS, "notebooks/ に .ipynb が見つかりません"
+    if notebook.name in NOT_RUN:
+        pytest.skip("モデルの取得が要るため実行しない（tools/check_ai_colab.py で確認する）")
     env: dict = {}
     for cell_id, source in code_cells(notebook):
         tree = ast.parse(source)
