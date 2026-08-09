@@ -141,6 +141,55 @@ def strip_thinking(text: object) -> str:
     return text.strip()
 
 
+_OPEN_TAG = "<think>"
+
+
+def _unfinished_tag_length(text: str) -> int:
+    """末尾が ``<think>`` の書きかけなら、その長さを返す。
+
+    ``答え<thi`` の ``<thi`` は続きが ``nk>`` かもしれない。出してしまうと
+    取り消せないので、ここだけ保留する。書きかけでない普通の文字は待たせない。
+    """
+    for length in range(min(len(text), len(_OPEN_TAG) - 1), 0, -1):
+        if _OPEN_TAG.startswith(text[-length:]):
+            return length
+    return 0
+
+
+class ThinkingFilter:
+    """少しずつ届く文字から、考えている途中を取り除いて渡す。
+
+    届いた分を溜めたうえで毎回まるごと判定し、**前回より増えた分だけ**返す。
+    ``<think>`` がチャンクの境目で割れても取りこぼさないのは、切れ端ではなく
+    常に全文を見ているため。末尾は少し残す（``<thi`` まで届いた時点で出すと、
+    続きが ``nk>`` だったときに取り消せない）。
+    """
+
+    def __init__(self) -> None:
+        self._buffer = ""
+        self._shown = ""
+
+    def feed(self, chunk: str) -> str:
+        """届いた分を渡し、表示してよくなった分を受け取る。"""
+        self._buffer += str(chunk)
+        return self._advance(hold_back=True)
+
+    def finish(self) -> str:
+        """もう続きが来ないとき、残りを全部受け取る。"""
+        return self._advance(hold_back=False)
+
+    def _advance(self, hold_back: bool) -> str:
+        clean = strip_thinking(self._buffer)
+        if hold_back:
+            keep = _unfinished_tag_length(clean)
+            if keep:
+                clean = clean[:-keep]
+        if len(clean) <= len(self._shown):
+            return ""
+        new, self._shown = clean[len(self._shown) :], clean
+        return new
+
+
 def _dtype_keyword(pipeline) -> str:
     """``pipeline()`` に数値の精度を渡すときのキーワード名。
 
@@ -202,6 +251,29 @@ class Ai:
             await self.load()
         return self._ask_with_transformers(prompt, max_tokens)
 
+    async def stream(self, prompt: object, max_tokens: int | None = None):
+        """答えを、書けたところから少しずつ受け取る。
+
+        ``ask()`` は全部書き終わるまで返らない。小さなモデルでも数十秒かかる
+        ことがあり、そのあいだ画面が変わらない。こちらは届いたぶんから返す。
+
+            text = ""
+            async for chunk in ai.stream("日本の四季について"):
+                text += chunk
+                print(text)
+
+        つなげると ``ask()`` と同じ文になる。**少しずつ返せない環境では、
+        全部書き終えてから一度にまとめて返す**（同じコードが動くことを優先）。
+        """
+        if in_browser():
+            async for chunk in self._stream_in_browser(prompt, max_tokens):
+                yield chunk
+            return
+        if self._pipe is None:
+            await self.load()
+        async for chunk in self._stream_with_transformers(prompt, max_tokens):
+            yield chunk
+
     # --- ブラウザ経路（PyHiroba 本体との契約） -----------------------------
     #
     # 本体のワーカーが js.pyhirobaAsk(kind, argsJson) -> Promise<resultJson> を用意する。
@@ -250,6 +322,42 @@ class Ai:
         # 両方の経路で同じ結果になるようにするため（二重にかけても何も起きない）。
         return strip_thinking(result.get("text", ""))
 
+    async def _stream_in_browser(self, prompt: object, max_tokens: int | None):
+        """本体が少しずつ返せるなら使い、無理なら ``ai-ask`` に落とす。
+
+        本体との受け渡しは「1回頼んで1回返る」形しか無いので、少しずつ受け取る
+        ときは ``ai-ask-start`` で始めて ``ai-ask-next`` を繰り返し呼ぶ。
+        本体がこれを知らない場合（古い版・未実装）は、そのまま ``ai-ask`` で
+        全文を受け取って一度に返す。詳しくは docs/PYHIROBA_INTEGRATION.md。
+        """
+        import json
+
+        if self._name is None:
+            await self.load()
+        try:
+            started = await self._call_host(
+                "ai-ask-start", json.dumps({"prompt": str(prompt), "max_tokens": max_tokens})
+            )
+            stream_id = started.get("id")
+        except Exception:  # noqa: BLE001 — 未対応の伝わり方は本体次第
+            stream_id = None
+        if not stream_id:
+            # 少しずつは無理だった。全文を一度に返す
+            yield await self._ask_in_browser(prompt, max_tokens)
+            return
+
+        thinking = ThinkingFilter()
+        while True:
+            part = await self._call_host("ai-ask-next", json.dumps({"id": stream_id}))
+            if part.get("done"):
+                last = thinking.feed(part.get("text", "")) + thinking.finish()
+                if last:
+                    yield last
+                return
+            chunk = thinking.feed(part.get("text", ""))
+            if chunk:
+                yield chunk
+
     # --- Colab 経路（transformers + torch） --------------------------------
 
     def _load_with_transformers(self, base: str) -> str:
@@ -294,20 +402,83 @@ class Ai:
                 add_generation_prompt=True,
                 enable_thinking=False,
             )
-        except (TypeError, ValueError):
+        except (AttributeError, TypeError, ValueError):
+            # テンプレートが enable_thinking を知らない版か、そもそも
+            # apply_chat_template を持たない場合。会話の形のまま渡して、
+            # 出力側の削り取り（strip_thinking）だけで対処する。
             return messages
 
-    def _ask_with_transformers(self, prompt: object, max_tokens: int | None) -> str:
+    def _generation_kwargs(self, max_tokens: int | None) -> dict:
         # 生成の設定はブラウザ側と揃えてある。小さなモデルはばらつきを大きくすると
         # 意味の通らない文章になりやすいので、温度を下げ繰り返しを抑える。
+        return {
+            "max_new_tokens": max_tokens or 256,
+            "temperature": 0.3,
+            "top_p": 0.9,
+            "repetition_penalty": 1.15,
+            "do_sample": True,
+            "return_full_text": False,
+        }
+
+    async def _stream_with_transformers(self, prompt: object, max_tokens: int | None):
+        """生成を別スレッドで走らせ、書けた分から受け取る。
+
+        transformers の streamer は「次が来るまで待つ」ふつうの反復子なので、
+        そのまま回すとノートブック全体が止まる。1つ取り出すごとに別スレッドへ
+        逃がして、待っているあいだ画面が動けるようにする。
+        """
+        import asyncio
+        import threading
+
+        try:
+            from transformers import TextIteratorStreamer
+        except ImportError:
+            # 少しずつ返せない版。全部書けてから一度に返す（同じコードは動く）
+            yield self._ask_with_transformers(prompt, max_tokens)
+            return
+
+        streamer = TextIteratorStreamer(
+            self._pipe.tokenizer, skip_prompt=True, skip_special_tokens=True
+        )
+        messages = [{"role": "user", "content": str(prompt)}]
+        failure: list[BaseException] = []
+
+        def generate() -> None:
+            try:
+                self._pipe(
+                    self._build_input(messages),
+                    streamer=streamer,
+                    **self._generation_kwargs(max_tokens),
+                )
+            except BaseException as error:  # noqa: BLE001 — 呼び出し側へ運ぶ
+                failure.append(error)
+                streamer.end()
+
+        worker = threading.Thread(target=generate, daemon=True)
+        worker.start()
+
+        loop = asyncio.get_running_loop()
+        iterator = iter(streamer)
+        stop = object()
+        thinking = ThinkingFilter()
+        while True:
+            piece = await loop.run_in_executor(None, lambda: next(iterator, stop))
+            if piece is stop:
+                break
+            chunk = thinking.feed(piece)
+            if chunk:
+                yield chunk
+        # 生成側で落ちていたら、黙って短い答えを返さずに知らせる
+        if failure:
+            raise failure[0]
+        last = thinking.finish()
+        if last:
+            yield last
+
+    def _ask_with_transformers(self, prompt: object, max_tokens: int | None) -> str:
         out = self._pipe(
             self._build_input([{"role": "user", "content": str(prompt)}]),
-            max_new_tokens=max_tokens or 256,
-            temperature=0.3,
-            top_p=0.9,
-            repetition_penalty=1.15,
-            do_sample=True,
-            return_full_text=False,
+            **self._generation_kwargs(max_tokens),
         )
         text = out[0]["generated_text"]
         # 会話形式で渡すと返り値も会話の並びになる。最後の発言を取り出す。

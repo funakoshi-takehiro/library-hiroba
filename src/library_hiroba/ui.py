@@ -34,6 +34,7 @@ from ._components import (
     stack,
     stat,
     table,
+    thinking,
 )
 from ._core import Widget, show
 from ._css import use_web_font
@@ -57,5 +58,6 @@ __all__ = [
     "stack",
     "stat",
     "table",
+    "thinking",
     "use_web_font",
 ]

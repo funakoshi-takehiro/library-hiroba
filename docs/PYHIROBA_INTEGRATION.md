@@ -51,7 +51,7 @@ globalThis.pyhirobaAsk = async (kind, argsJson) => { /* … */ return resultJson
 ```
 
 - 引数も返り値も **JSON 文字列だけ**です（Pyodide と JS の境界を単純に保つため）
-- `kind` は次の2つだけ使います。本体の許可リストに `ai-models` があっても、library-hiroba は呼びません（後述）
+- `kind` は `ai-load` と `ai-ask` の2つが必須で、`ai-ask-start` / `ai-ask-next` は任意です（後述）。本体の許可リストに `ai-models` があっても、library-hiroba は呼びません（後述）
 
 | `kind` | 渡す JSON | 期待する JSON | 読む値 |
 |---|---|---|---|
@@ -59,6 +59,20 @@ globalThis.pyhirobaAsk = async (kind, argsJson) => { /* … */ return resultJson
 | `ai-ask` | `{"prompt": "日本の四季について", "max_tokens": 64}` | `{"text": "…", "ms": 3700, "device": "webgpu"}` | `text`（無ければ空文字） |
 
 `max_tokens` は指定が無いと `null` を渡します。本体側の既定（256）で扱ってください。
+
+### 書けたところから返す（任意）
+
+`ai.stream()` は答えを少しずつ受け取ります。**対応は任意です** — 下の2つを本体が知らなければ、自動的に `ai-ask` に落ちて全文が一度に返ります。利用者のコードは書き換え不要です。
+
+| `kind` | 渡す JSON | 期待する JSON |
+|---|---|---|
+| `ai-ask-start` | `{"prompt": "…", "max_tokens": 64}` | `{"id": "任意の文字列"}` |
+| `ai-ask-next` | `{"id": "…"}` | `{"text": "次に書けたぶん", "done": false}` |
+
+- `ai-ask-next` は、次が書けるまで待ってから返してください（空文字を返し続けると無駄に往復します）
+- 最後の呼び出しで `"done": true` を返します。`text` に残りが入っていても構いません
+- `id` を返さない、または `ai-ask-start` で失敗した場合、library-hiroba は `ai-ask` に切り替えます。**未対応であることを伝えるために、わざわざ何かを実装する必要はありません**
+- `<think>…</think>` はライブラリ側で取り除きます。チャンクの境目で割れていても大丈夫なので、本体は分割位置を気にしなくて構いません
 
 ### モデルの名前
 

@@ -533,6 +533,38 @@ def stack(*items, gap="12px") -> Stack:
     return Stack(items, gap=gap)
 
 
+class Thinking(Widget):
+    """「考え中」を点の動きで伝える部品。
+
+    答えが出るまで画面が変わらないと、押せていないと思われる。JavaScript は
+    使えないので、点の明滅は CSS だけで動かしている。
+    """
+
+    css_keys = ("thinking",)
+
+    def __init__(self, text: object = "考え中"):
+        self.text = text
+
+    def fragment(self) -> str:
+        label = f"<span>{esc(self.text)}</span>" if shown(self.text) else ""
+        # 点は目で見るためのもの。読み上げには言葉だけ伝える
+        return (
+            f'<div class="hui-thinking" role="status">{label}'
+            f'<span class="hui-thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span>'
+            f"</div>"
+        )
+
+
+def thinking(text="考え中") -> Thinking:
+    """答えを待っていることを、点の動きで伝える。
+
+    >>> ui.thinking("AI が考えています")
+
+    ``ui.form()`` は送信の直後にこれを自動で出す（``pending`` で変えられる）。
+    """
+    return Thinking(text)
+
+
 class Chat(Container):
     """会話を吹き出しで並べる部品。"""
 

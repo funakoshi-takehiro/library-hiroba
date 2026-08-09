@@ -73,6 +73,7 @@ PyHiroba では、同梱されていれば `import library_hiroba` だけで使�
 | テーブル | `ui.table([{"名前": "佐藤", "得点": 90}], caption="結果")` |
 | 自由 HTML/CSS | `ui.html('<div class="x">…</div>', css=".x { color: hotpink; }")` |
 | 入力フォーム | `ui.form(handler, ui.field("question", label="質問"))` |
+| 考え中の表示 | `ui.thinking("考え中")`（`ui.form()` が送信中に自動で出します） |
 | 会話の表示 | `ui.chat([{"role": "user", "content": "…"}, {"role": "assistant", "content": "…"}])` |
 
 > **外部への通信はありません。** 部品は PyHiroba と同じ書体（Zen Kaku Gothic New）を名前で指定しますが、**取りには行きません**。PyHiroba ではページ側が読み込み済みなので、それだけで見た目が揃います。持っていない環境（Colab など）では端末の書体になります。Colab でも同じ書体で揃えたい場合は `ui.use_web_font(True)` を呼んでください（そのぶん表示のたびに Google へ通信が起き、閲覧者の IP が渡ります）。`ai` を使う場合のモデル取得を除けば、ほかに外部へ通信する箇所はありません。
@@ -134,7 +135,7 @@ ui.form(ask, ui.field("question", label="質問"),
 
 ## AI（小さな言語モデル）
 
-`ai` は、小さな言語モデルをその場で動かします。メソッドは3つだけです。
+`ai` は、小さな言語モデルをその場で動かします。メソッドは4つだけです。
 
 ```python
 from library_hiroba import ai
@@ -142,6 +143,9 @@ from library_hiroba import ai
 await ai.models()                  # 選べるモデルの一覧
 await ai.load()                    # モデルを読み込む（初回だけ時間がかかります）
 print(await ai.ask("日本の四季について、2行で書いて"))
+
+async for chunk in ai.stream("俳句を1つ"):   # 書けたぶんから受け取る
+    print(chunk, end="")
 ```
 
 `await` が必要です。ノートブック（Colab / Jupyter / PyHiroba）では、セルの中にそのまま `await` を書けます。PyHiroba は GitHub Pages 配信のため `SharedArrayBuffer` を使った同期待ちができず、ブラウザ側は待つ形にせざるを得ません。Colab 側は待つ必要がありませんが、**同じコードが両方で動く**ことを優先して形を揃えています。
@@ -204,9 +208,32 @@ ui.form(ask, ui.field("question", label="質問"),
 
 入力を Python に戻す経路は環境によって変わるため、この組み合わせが動くのは今のところ Colab・Jupyter です（PyHiroba は本体側の対応待ちです）。
 
-**送信してから答えが出るまで、画面は変わりません。** `handler` が返した1つの部品を最後に一度だけ表示するしくみのため、「考え中…」のような途中経過は今のところ出せません。小さなモデルでも数秒かかるので、押せていないと思われることがあります。授業では「送信を押したら少し待つ」と先に伝えておいてください。
+送信を押すと、答えが返るまで**「考え中」の点が動きます**（自動）。言葉を変えるときは `pending="AI が考えています"`、出さないときは `pending=None` を渡してください。
 
 はじめに `await ai.load()` を済ませておくと、1通目でモデルの読み込み（数十秒〜）を待たされずに済みます。
+
+### 書けたところから少しずつ出す
+
+`ai.stream()` は、答えを**書けたぶんから**返します。`handler` を `yield` で書くと、届くたびに表示が差し替わります。
+
+```python
+history = []
+
+async def talk(question):
+    history.append({"role": "user", "content": question})
+    text = ""
+    async for chunk in ai.stream(question):
+        text += chunk
+        yield ui.chat(history + [{"role": "assistant", "content": text}],
+                      names={"user": "あなた", "assistant": "AI"})
+    history.append({"role": "assistant", "content": text})
+
+await ai.load()
+ui.form(talk, ui.field("question", label="質問"),
+        submit_label="送信", clear_on_submit=True)
+```
+
+`ai.stream()` を全部つなげると `ai.ask()` と同じ文になります。**少しずつ返せない環境では、書き終えてから一度にまとめて返します** — どちらでも同じコードが動きます。考えている途中（`<think>`）は、途中で切れても取り除かれます。
 
 モデルのライセンスは配布元をご確認ください（既定の Qwen2.5 は Apache-2.0）。
 

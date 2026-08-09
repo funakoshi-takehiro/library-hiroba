@@ -11,6 +11,7 @@ import asyncio
 import inspect
 import json
 import sys
+import time
 import types
 
 import pytest
@@ -91,6 +92,7 @@ UI_MAY_IMPORT = {
     "keyword",
     "re",
     "secrets",
+    "traceback",
     "typing",
     # ノートブックのある環境でだけ使う。無ければ使わない作りになっている
     "IPython",
@@ -487,3 +489,234 @@ def test_text_that_is_not_a_string_does_not_crash(fresh_ai, in_browser):
     """本体が数値を返しても止まらない（文字列にして返す）。"""
     in_browser.replies["ai-ask"] = {"text": 123}
     assert run(fresh_ai.ask("q")) == "123"
+
+
+# --- 少しずつ受け取る -------------------------------------------------------
+
+
+def collect(chunks):
+    """チャンクを順に流し込み、表示された文字を全部つなげる。"""
+    f = _ai.ThinkingFilter()
+    out = "".join(f.feed(c) for c in chunks)
+    return out + f.finish()
+
+
+@pytest.mark.parametrize(
+    "chunks,expected",
+    [
+        (["答え", "は", "3です"], "答えは3です"),
+        # <think> が丸ごと1チャンクに入る
+        (["<think>考え</think>", "答え"], "答え"),
+        # <think> がチャンクの境目で割れる（ここが取りこぼしやすい）
+        (["<thi", "nk>考え</th", "ink>答え"], "答え"),
+        (["<", "t", "h", "i", "n", "k", ">", "え", "</think>", "答"], "答"),
+        # 閉じない think は最後まで見せない
+        (["答え", "<think>まだ考え"], "答え"),
+        (["<think>ずっと考えている"], ""),
+        # think のあとにも本文が続く
+        (["A", "<think>x</think>", "B", "<think>y</think>", "C"], "ABC"),
+        ([], ""),
+    ],
+)
+def test_streaming_hides_thinking_across_chunk_boundaries(chunks, expected):
+    assert collect(chunks) == expected
+
+
+def test_streaming_never_shows_a_half_written_tag():
+    """<thi まで届いた時点で出してしまうと、あとから取り消せない。"""
+    f = _ai.ThinkingFilter()
+    assert f.feed("答え<thi") == "答え"  # 書きかけのタグだけ保留される
+    assert f.feed("nk>秘密</think>") == ""  # think と分かったので何も出さない
+    assert f.feed("です") == "です"
+    assert f.finish() == ""
+
+
+def test_ordinary_text_is_not_delayed():
+    """タグの書きかけでない普通の文字は、待たせずにそのまま出す。"""
+    f = _ai.ThinkingFilter()
+    assert f.feed("こんにちは") == "こんにちは"
+    assert f.feed("、元気？") == "、元気？"
+    assert f.finish() == ""
+
+
+def test_only_a_real_tag_prefix_is_held():
+    f = _ai.ThinkingFilter()
+    assert f.feed("答えは<") == "答えは"  # < は <think> の始まりかもしれない
+    assert f.feed("3です") == "<3です"  # 違った。取り消さずに続けられる
+
+
+def test_streaming_and_asking_agree(fresh_ai, in_browser):
+    """つなげた結果が ask() と同じ文になること。"""
+    in_browser.replies["ai-ask"] = {"text": "<think>考え</think>答えは3です"}
+
+    async def gather():
+        return "".join([c async for c in fresh_ai.stream("q")])
+
+    assert run(gather()) == run(fresh_ai.ask("q")) == "答えは3です"
+
+
+def test_stream_falls_back_when_the_host_cannot_do_it(fresh_ai, in_browser):
+    """本体が少しずつ返せなくても、同じコードが動くこと（全文が一度に来る）。"""
+    in_browser.replies["ai-ask"] = {"text": "全文です"}
+    # ai-ask-start に id を返さない＝未対応
+
+    async def gather():
+        return [c async for c in fresh_ai.stream("q")]
+
+    assert run(gather()) == ["全文です"]
+    assert "ai-ask" in [kind for kind, _ in in_browser.calls]
+
+
+def test_stream_uses_the_host_when_it_can(fresh_ai, monkeypatch):
+    """ai-ask-start が id を返したら、ai-ask-next を繰り返す。"""
+    parts = [
+        {"text": "こん", "done": False},
+        {"text": "にちは", "done": False},
+        {"text": "！", "done": True},
+    ]
+    calls = []
+
+    async def host(kind, args_json):
+        calls.append(kind)
+        if kind == "ai-load":
+            return json.dumps({})
+        if kind == "ai-ask-start":
+            return json.dumps({"id": "s1"})
+        return json.dumps(parts.pop(0))
+
+    js = types.ModuleType("js")
+    js.pyhirobaAsk = host
+    monkeypatch.setitem(sys.modules, "js", js)
+
+    async def gather():
+        return [c async for c in fresh_ai.stream("q")]
+
+    assert "".join(run(gather())) == "こんにちは！"
+    assert calls.count("ai-ask-next") == 3
+    assert "ai-ask" not in calls  # 全文取得には落ちていない
+
+
+# --- Colab 経路で少しずつ受け取る -------------------------------------------
+
+
+class _FakeStreamer:
+    """transformers の TextIteratorStreamer の代役。
+
+    本物と同じく「生成が進むまで待つ反復子」として振る舞う。
+    """
+
+    def __init__(self, tokenizer, **kwargs):
+        self.pieces = []
+        self.closed = False
+        self.kwargs = kwargs
+
+    def put(self, piece):
+        self.pieces.append(piece)
+
+    def end(self):
+        self.closed = True
+
+    def __iter__(self):
+        while self.pieces or not self.closed:
+            if self.pieces:
+                yield self.pieces.pop(0)
+            else:
+                time.sleep(0.001)
+
+
+def install_fake_streaming(monkeypatch, answer, fail=None):
+    """一文字ずつ流す偽の pipeline と streamer を入れる。"""
+    holder = {}
+
+    def pipeline_call(prompt, streamer=None, **kwargs):
+        holder["kwargs"] = kwargs
+        if fail is not None:
+            raise fail
+        for ch in answer:
+            streamer.put(ch)
+        streamer.end()
+        return [{"generated_text": answer}]
+
+    pipeline_call.tokenizer = _FakeTokenizer()
+    transformers = types.ModuleType("transformers")
+    transformers.TextIteratorStreamer = _FakeStreamer
+    monkeypatch.setitem(sys.modules, "transformers", transformers)
+    return pipeline_call, holder
+
+
+def test_colab_streaming_yields_piece_by_piece(fresh_ai, monkeypatch):
+    pipe, holder = install_fake_streaming(monkeypatch, "こんにちは")
+    fresh_ai._pipe = pipe
+    fresh_ai._name = "qwen05"
+
+    async def gather():
+        return [c async for c in fresh_ai.stream("q")]
+
+    chunks = run(gather())
+    assert "".join(chunks) == "こんにちは"
+    assert len(chunks) > 1, "1回にまとめて返っていて、少しずつになっていない"
+    assert holder["kwargs"]["max_new_tokens"] == 256
+
+
+def test_colab_streaming_hides_thinking(fresh_ai, monkeypatch):
+    pipe, _ = install_fake_streaming(monkeypatch, "<think>考え</think>答えは3です")
+    fresh_ai._pipe = pipe
+    fresh_ai._name = "qwen3_06"
+
+    async def gather():
+        return "".join([c async for c in fresh_ai.stream("q")])
+
+    assert run(gather()) == "答えは3です"
+
+
+def test_colab_streaming_reports_a_failure(fresh_ai, monkeypatch):
+    """生成が別スレッドで落ちたとき、短い答えとして黙って返さないこと。"""
+    pipe, _ = install_fake_streaming(monkeypatch, "", fail=RuntimeError("メモリが足りません"))
+    fresh_ai._pipe = pipe
+    fresh_ai._name = "qwen05"
+
+    async def gather():
+        return [c async for c in fresh_ai.stream("q")]
+
+    with pytest.raises(RuntimeError, match="メモリが足りません"):
+        run(gather())
+
+
+def test_colab_streaming_falls_back_on_old_transformers(fresh_ai, monkeypatch):
+    """TextIteratorStreamer が無い版でも、同じコードが動くこと。"""
+    transformers = types.ModuleType("transformers")  # streamer なし
+    monkeypatch.setitem(sys.modules, "transformers", transformers)
+
+    def pipe(prompt, **kwargs):
+        return [{"generated_text": "全文です"}]
+
+    pipe.tokenizer = _FakeTokenizer()
+    fresh_ai._pipe = pipe
+    fresh_ai._name = "qwen05"
+
+    async def gather():
+        return [c async for c in fresh_ai.stream("q")]
+
+    assert run(gather()) == ["全文です"]
+
+
+def test_streaming_does_not_block_the_notebook(fresh_ai, monkeypatch):
+    """待っているあいだ、ほかの処理が進めること（画面が固まらない）。"""
+    pipe, _ = install_fake_streaming(monkeypatch, "あいうえお")
+    fresh_ai._pipe = pipe
+    fresh_ai._name = "qwen05"
+    ticks = []
+
+    async def heartbeat():
+        for _ in range(20):
+            await asyncio.sleep(0.002)
+            ticks.append(1)
+
+    async def both():
+        beat = asyncio.ensure_future(heartbeat())
+        chunks = [c async for c in fresh_ai.stream("q")]
+        await beat
+        return chunks
+
+    run(both())
+    assert ticks, "受け取っているあいだ、ほかの処理が一切進んでいない"

@@ -518,6 +518,41 @@ COMPONENT_CSS = {
   border: 1px solid var(--hui-line);
   font-size: 0.9em;
 }""",
+    # 考え中の点。JavaScript は使わず CSS だけで動かす。
+    # 動きを減らす設定の端末では、点は出したまま animation だけ止める
+    # （消してしまうと「待っている」ことが伝わらなくなる）。
+    "thinking": """\
+.hui-thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: var(--hui-radius);
+  border-bottom-left-radius: var(--hui-radius-sm);
+  background: var(--hui-paper);
+  border: 1px solid var(--hui-line);
+  box-shadow: var(--hui-shadow);
+  color: var(--hui-ink-3);
+  font-size: 0.9em;
+  margin: 10px 0;
+}
+.hui-thinking-dots { display: inline-flex; gap: 4px; }
+.hui-thinking-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--hui-accent);
+  opacity: 0.35;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .hui-thinking-dots i { animation: hui-blink 1.2s ease-in-out infinite; }
+  .hui-thinking-dots i:nth-child(2) { animation-delay: 0.2s; }
+  .hui-thinking-dots i:nth-child(3) { animation-delay: 0.4s; }
+}
+@keyframes hui-blink {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-3px); }
+}""",
     "stack": """\
 .hui-stack { display: flex; flex-direction: column; margin: 10px 0; }
 .hui-stack > * { margin: 0; }

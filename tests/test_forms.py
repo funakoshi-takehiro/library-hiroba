@@ -132,16 +132,37 @@ def test_user_text_is_escaped():
 
 
 class _FakeDisplay:
-    """IPython.display の代役。display() に渡された物を記録する。"""
+    """IPython.display の代役。display() に渡された物を記録する。
+
+    本物と同じく ``display_id=True`` を受け取り、差し替え用の取っ手を返す
+    （「考え中」から答えへの差し替えがこれを使う）。
+    """
 
     def __init__(self):
         self.displayed = []
 
+    def _display(self, obj, display_id=None):
+        self.displayed.append(obj)
+        return self
+
+    def update(self, obj):
+        """取っ手として使われたとき。前の表示を差し替える。"""
+        self.displayed.append(obj)
+
     def module(self):
         mod = types.ModuleType("IPython.display")
-        mod.display = self.displayed.append
+        mod.display = self._display
         mod.clear_output = lambda **k: None
         return mod
+
+    @property
+    def widgets_shown(self):
+        """表示されたもののうち、部品だけ（考え中を除く）。"""
+        return [
+            x
+            for x in self.displayed
+            if isinstance(x, ui.Widget) and "hui-thinking" not in x._repr_html_()
+        ]
 
 
 @pytest.fixture
@@ -247,10 +268,10 @@ def test_async_handler_is_awaited_on_the_input_path(fake_ipython, monkeypatch):
     monkeypatch.setitem(sys.modules, "ipywidgets", None)
     monkeypatch.setattr("builtins.input", lambda prompt="": "スマホは持っていっていい？")
     make_async_form()._ipython_display_()
-    # コルーチンのままではなく、待った結果が表示される
-    assert len(fake_ipython.displayed) == 1
-    shown = fake_ipython.displayed[0]
-    assert isinstance(shown, ui.Widget)
+    # 待つあいだは「考え中」、そのあと結果に差し替わる
+    # （コルーチンがそのまま出るのではない）
+    assert [type(x).__name__ for x in fake_ipython.displayed] == ["Thinking", "Card"]
+    shown = fake_ipython.widgets_shown[-1]
     assert "スマホは持っていっていい？" in shown._repr_html_()
 
 
@@ -368,3 +389,109 @@ def test_python_keywords_are_rejected_as_field_names(name):
 @pytest.mark.parametrize("name", ["class_", "組", "answer", "x2"])
 def test_ordinary_names_still_work(name):
     assert ui.field(name).name == name
+
+
+# --- 待っているあいだの表示 -------------------------------------------------
+
+
+class _Recorder:
+    """display された順番を記録する、Output の代わり。"""
+
+    def __init__(self):
+        self.shown = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _drive(result, pending=None, into=None):
+    """display_result を回し、表示されたものを順に返す。"""
+    import library_hiroba._forms as forms
+
+    shown = []
+
+    class FakeDisplay:
+        def __call__(self, obj, display_id=None):
+            shown.append(obj)
+            return self
+
+        def update(self, obj):
+            shown.append(obj)
+
+    fake = FakeDisplay()
+    module = types.ModuleType("IPython.display")
+    module.display = fake
+    module.clear_output = lambda wait=False: None
+    old = sys.modules.get("IPython.display")
+    sys.modules["IPython.display"] = module
+    try:
+        forms.display_result(result, into=into, pending=pending)
+        while forms._PENDING:
+            asyncio.get_event_loop_policy().new_event_loop()
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(
+                    asyncio.gather(*list(forms._PENDING), return_exceptions=True)
+                )
+            finally:
+                loop.close()
+    finally:
+        if old is not None:
+            sys.modules["IPython.display"] = module if old is None else old
+    return shown
+
+
+def test_pending_is_shown_before_the_answer():
+    """押した直後に「考え中」、答えが来たら差し替わること。"""
+
+    async def slow():
+        await asyncio.sleep(0)
+        return ui.card("答え", "3です")
+
+    shown = _drive(slow(), pending=ui.thinking("考え中"))
+    assert len(shown) == 2
+    assert isinstance(shown[0], ui.Widget)
+    assert "hui-thinking" in shown[0]._repr_html_()
+    assert "3です" in shown[1]._repr_html_()
+
+
+def test_a_synchronous_answer_skips_the_pending_step():
+    """待たないなら「考え中」を挟む意味がない。"""
+    shown = _drive(ui.card("すぐ出る"), pending=ui.thinking())
+    assert len(shown) == 1
+    assert "すぐ出る" in shown[0]._repr_html_()
+
+
+def test_a_generator_handler_replaces_the_display_each_time():
+    """一文字ずつ出すための経路。yield ごとに差し替わること。"""
+
+    async def stream():
+        text = ""
+        for chunk in ["こ", "ん", "に", "ちは"]:
+            text += chunk
+            await asyncio.sleep(0)
+            yield ui.card("答え", text)
+
+    shown = _drive(stream(), pending=ui.thinking())
+    assert len(shown) == 5  # 考え中 + 4回
+    bodies = [s._repr_html_() for s in shown[1:]]
+    assert "こ<" in bodies[0] or "こ" in bodies[0]
+    assert "こんにちは" in bodies[-1]
+
+
+def test_form_shows_thinking_by_default():
+    f = ui.form(lambda q: q, ui.field("q"))
+    assert f.pending is not None
+    assert "hui-thinking" in f.pending._repr_html_()
+
+
+def test_pending_can_be_a_word_or_turned_off():
+    assert "AI が考えています" in ui.form(
+        lambda q: q, ui.field("q"), pending="AI が考えています"
+    ).pending._repr_html_()
+    assert ui.form(lambda q: q, ui.field("q"), pending=None).pending is None
+    custom = ui.card("待ってね")
+    assert ui.form(lambda q: q, ui.field("q"), pending=custom).pending is custom

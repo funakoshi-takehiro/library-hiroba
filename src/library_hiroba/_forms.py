@@ -33,6 +33,29 @@ _REGISTRY_LIMIT = 64
 # 表示待ちの処理。回収されないよう、終わるまでここで持つ（display_result 参照）
 _PENDING: set = set()
 
+# pending を書かなかったときの印。None は「出さない」の指定に使うため、
+# 「指定なし」と区別できる別の値が要る。
+_DEFAULT_PENDING = object()
+
+
+def _resolve_pending(pending: object) -> object:
+    """``pending`` の指定を、実際に表示する部品にする。
+
+    - 書かなかった … 既定の「考え中」
+    - ``None`` … 何も出さない
+    - 文字列 … その言葉の「考え中」
+    - 部品 … そのまま
+    """
+    from ._components import thinking
+
+    if pending is _DEFAULT_PENDING:
+        return thinking()
+    if pending is None:
+        return None
+    if isinstance(pending, Widget):
+        return pending
+    return thinking(pending)
+
 
 def get_form(form_id: str) -> Form | None:
     """表示済みのフォームを ID で取り出す。見つからなければ ``None``。
@@ -147,42 +170,81 @@ def as_field(item: FieldLike) -> Field:
     return item if isinstance(item, Field) else Field(str(item))
 
 
-def display_result(result: object, into: object = None) -> None:
+def display_result(result: object, into: object = None, pending: object = None) -> None:
     """``handler`` の返り値を表示する。
 
-    ``ai.ask()`` を呼ぶ handler は ``async def`` で書くことになり、返り値は
-    ``await`` してからでないと中身が取れない。そのまま表示するとコルーチン
-    オブジェクトが出てしまうため、待ってから表示する。
+    受け取れる形は3つあり、どれも同じ場所に出す。
+
+    - ふつうの部品 … そのまま表示する
+    - ``await`` の要るもの（``async def``）… 待ってから表示する
+    - 何度も ``yield`` するもの（``async def`` + ``yield``）… 届くたびに差し替える
+
+    3つめが、AI の答えを書きかけのまま少しずつ見せるための経路。
+
+    ``pending`` を渡すと、待ちに入る前にそれを先に表示する。答えが出るまで
+    画面が変わらないと、押せていないと思われるため。
 
     ``into`` に ipywidgets の Output を渡すと、その中に表示する（待っている
     あいだにセルの実行が終わっても、結果がフォームの下に出るようにするため）。
     """
-    from IPython.display import display
+    from IPython.display import clear_output, display
 
-    if not inspect.isawaitable(result):
+    waits = inspect.isawaitable(result)
+    streams = inspect.isasyncgen(result)
+    if not waits and not streams:
+        # 待たないなら「考え中」を出す意味がない
         display(result)
         return
 
-    async def wait_then_show() -> None:
-        # await は Output の中で行う。handler が途中で失敗したときに、
-        # その内容がフォームの下にそのまま表示されるようにするため。
-        if into is None:
-            display(await result)
+    async def steps():
+        """表示するものを、出す順に並べる。"""
+        if pending is not None:
+            yield pending
+        if streams:
+            async for item in result:
+                yield item
         else:
+            yield await result
+
+    async def show_each() -> None:
+        if into is not None:
+            # Output の中に居続ける。handler が途中で失敗しても、その内容が
+            # フォームの下にそのまま表示される（Output が拾って見せてくれる）。
             with into:
-                display(await result)
+                async for item in steps():
+                    # wait=True なので、次が届くまで前の表示は消えない（ちらつかない）
+                    clear_output(wait=True)
+                    display(item)
+            return
+        # Output が無い場合。差し替えが要るときだけ取っ手を使う
+        # （cell 全体を消すと、フォーム自体まで消えてしまうため）。
+        # 1回しか出さないなら、ふつうに display する。
+        replaces = streams or pending is not None
+        handle = None
+        try:
+            async for item in steps():
+                if not replaces:
+                    display(item)
+                elif handle is None:
+                    handle = display(item, display_id=True)
+                else:
+                    handle.update(item)
+        except Exception:  # noqa: BLE001 — 黙って消えるほうが困る
+            import traceback
+
+            traceback.print_exc()
 
     try:
         asyncio.get_running_loop()
     except RuntimeError:
         # ノートブックの外（素の Python）。回っているループが無いので自分で回す
-        asyncio.run(wait_then_show())
+        asyncio.run(show_each())
     else:
-        # ノートブックの中。ループに載せて、終わったときに表示する。
+        # ノートブックの中。ループに載せて、届いたものから順に表示する。
         # 参照を持たないと、待っている最中に回収されて結果が出ないことがある
         # （ループはタスクを弱参照でしか持たない）。AI の返事は数秒かかるので、
         # 終わるまで手元で持っておき、終わったら捨てる。
-        task = asyncio.ensure_future(wait_then_show())
+        task = asyncio.ensure_future(show_each())
         _PENDING.add(task)
         task.add_done_callback(_PENDING.discard)
 
@@ -199,6 +261,7 @@ class Form(Widget):
         submit_label: str = "送信",
         title: object = None,
         clear_on_submit: bool = False,
+        pending: object = _DEFAULT_PENDING,
     ):
         if not callable(handler):
             raise ValueError("handler には関数を渡してください")
@@ -212,6 +275,7 @@ class Form(Widget):
         self.submit_label = submit_label
         self.title = title
         self.clear_on_submit = clear_on_submit
+        self.pending = _resolve_pending(pending)
         self.form_id = unique_name("hui-form")
 
     # --- 表示 ---------------------------------------------------------------
@@ -295,7 +359,7 @@ class Form(Widget):
                     controls[name].value = ""
             with output:
                 clear_output(wait=True)
-                display_result(self.handler(**values), into=output)
+                display_result(self.handler(**values), into=output, pending=self.pending)
 
         button.on_click(on_click)
         header = [widgets.HTML(f"<b>{esc(self.title)}</b>")] if self.title is not None else []
@@ -305,7 +369,7 @@ class Form(Widget):
     def _run_with_input(self) -> None:
         """``input()`` で順番に聞いて、結果を表示する。"""
         values = {field.name: field.ask_via_input() for field in self.fields}
-        display_result(self.handler(**values))
+        display_result(self.handler(**values), pending=self.pending)
 
     def submit(self, **values: object) -> object:
         """入力値を渡して ``handler`` を呼ぶ。
@@ -333,7 +397,14 @@ def field(name, label=None, placeholder="", kind="text", choices=None, default="
     )
 
 
-def form(handler, *fields, submit_label="送信", title=None, clear_on_submit=False) -> Form:
+def form(
+    handler,
+    *fields,
+    submit_label="送信",
+    title=None,
+    clear_on_submit=False,
+    pending=_DEFAULT_PENDING,
+) -> Form:
     """入力欄とボタンを表示し、押されたら ``handler`` を呼ぶ。
 
     ``handler`` は入力欄の name をキーワード引数として受け取り、
@@ -346,6 +417,19 @@ def form(handler, *fields, submit_label="送信", title=None, clear_on_submit=Fa
     入力欄は文字列だけでも指定できる（その名前のテキスト欄になる）。
 
     >>> ui.form(ask, "question")
+
+    ``handler`` が ``async def`` のときは、待っているあいだ「考え中」が出る。
+    言葉を変えたいときは ``pending="AI が考えています"``、出したくないときは
+    ``pending=None`` を渡す。
+
+    ``handler`` を ``yield`` で書くと、届いたものから順に差し替えて表示する。
+    AI の答えを書きかけのまま見せたいときに使う。
+
+    >>> async def ask(question):
+    ...     text = ""
+    ...     async for chunk in ai.stream(question):
+    ...         text += chunk
+    ...         yield ui.card("答え", text)
     """
     return Form(
         handler,
@@ -353,4 +437,5 @@ def form(handler, *fields, submit_label="送信", title=None, clear_on_submit=Fa
         submit_label=submit_label,
         title=title,
         clear_on_submit=clear_on_submit,
+        pending=pending,
     )
