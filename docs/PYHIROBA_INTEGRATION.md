@@ -66,6 +66,9 @@ globalThis.pyhirobaAsk = async (kind, argsJson) => { /* … */ return resultJson
 | `qwen05`（既定） | `qwen05-q8` | `onnx-community/Qwen2.5-0.5B-Instruct` | `Qwen/Qwen2.5-0.5B-Instruct` |
 | `qwen05-q4` | `qwen05-q4` | 同上（q4 の重み） | `Qwen/Qwen2.5-0.5B-Instruct` |
 | `qwen15` | `qwen15-q4` | `onnx-community/Qwen2.5-1.5B-Instruct` | `Qwen/Qwen2.5-1.5B-Instruct` |
+| `qwen3_06` | `qwen3_06-q4` | `onnx-community/Qwen3-0.6B-ONNX` | `Qwen/Qwen3-0.6B` |
+| `qwen3_06-q8` | `qwen3_06-q8` | 同上（q8 の重み） | `Qwen/Qwen3-0.6B` |
+| `qwen3_17` | `qwen3_17-q4` | `onnx-community/Qwen3-1.7B-ONNX` | `Qwen/Qwen3-1.7B` |
 | `llmjp150m` | `llmjp150m-q4` | `onnx-community/llm-jp-3-150m-instruct2-ONNX` | `llm-jp/llm-jp-3-150m-instruct2` |
 
 精度まで指定されたときは、その指定をそのまま尊重して渡します。一覧に無い名前は本体に届く前に `ValueError` にします。
@@ -73,6 +76,15 @@ globalThis.pyhirobaAsk = async (kind, argsJson) => { /* … */ return resultJson
 **右の2列は同じモデルの別形式でなければいけません。** 本体が別の変換元を選ぶと、利用者は同じ名前を書いたのに環境ごとに違うモデルが動きます。取り違えを防ぐため、両方を `_ai.py` の `MODELS`（`browser_repo` と `colab_id`）に書き、名前が一致することをテストで確かめています（`tests/test_ai.py::test_both_paths_load_the_same_model`）。
 
 > `llmjp150m` が **instruct3 ではなく instruct2** なのは、ONNX に変換されているのが instruct2 だけだからです。Colab だけ instruct3 にすると上記のずれが起きます。150M では両者の差はほとんどないため、揃えるほうを採りました。
+
+### 考えている途中を見せない（Qwen3 系）
+
+`qwen3_06` と `qwen3_17` は、答えの前に `<think>…</think>` で考えを書きます。授業では答えだけ見えればよいので、**本体側でも次の2つをお願いします**。
+
+1. チャットテンプレートを当てるとき `enable_thinking: false` を渡す
+2. 生成された文字列から `<think>…</think>` を取り除いてから返す
+
+`_ai.py` は本体から受け取った文字列にも同じ削り取りを通します（`strip_thinking`）。**本体が忘れても利用者に見える結果は変わりません**が、1 をしないと考えるぶんだけ待ち時間と字数が無駄になります。字数が尽きて `</think>` が来なかった場合は、考えの途中を見せずに空文字列を返します。
 
 ### モデルを増やすとき
 

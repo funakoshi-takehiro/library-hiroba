@@ -26,6 +26,8 @@ PyHiroba は GitHub Pages で配信しているため COOP/COEP ヘッダを付�
 
 from __future__ import annotations
 
+import re
+
 __all__ = ["Ai", "ai"]
 
 
@@ -58,6 +60,24 @@ MODELS = {
         "browser_key": "qwen15-q4",
         "browser_variants": ("qwen15-q4",),
         "approx_mb": {"browser": 1600, "colab": 3100},
+    },
+    "qwen3_06": {
+        "label": "Qwen3 0.6B（Qwen2.5 0.5B より新しい・日本語が少し良い）",
+        "colab_id": "Qwen/Qwen3-0.6B",
+        "browser_repo": "onnx-community/Qwen3-0.6B-ONNX",
+        "browser_key": "qwen3_06-q4",
+        "browser_variants": ("qwen3_06-q4", "qwen3_06-q8"),
+        "approx_mb": {"browser": 550, "colab": 1500},
+        "has_thinking": True,
+    },
+    "qwen3_17": {
+        "label": "Qwen3 1.7B（この一覧でいちばん賢い・重い）",
+        "colab_id": "Qwen/Qwen3-1.7B",
+        "browser_repo": "onnx-community/Qwen3-1.7B-ONNX",
+        "browser_key": "qwen3_17-q4",
+        "browser_variants": ("qwen3_17-q4",),
+        "approx_mb": {"browser": 1300, "colab": 3400},
+        "has_thinking": True,
     },
     "llmjp150m": {
         # instruct3 ではなく instruct2。ONNX に変換されているのが instruct2 だけで、
@@ -98,6 +118,27 @@ def resolve(name: str | None) -> tuple[str, str]:
         f"そのモデルは選べません: {name}"
         "（await ai.models() で選べるものを確認できます）"
     )
+
+
+# ---------------------------------------------------------------------------
+# 考えている途中を隠す
+# ---------------------------------------------------------------------------
+# Qwen3 系は答えの前に <think>…</think> で考えを書く。授業では答えだけ見えれば
+# よく、途中が出ると読みづらい。組み立てるときに出さない設定を頼み（古い版だと
+# 通らないので、その時は黙って諦める）、出てきてしまったぶんは最後に削る。
+# 本体（ブラウザ）側にも同じ処理を頼んである。docs/PYHIROBA_INTEGRATION.md 参照。
+_THINKING_BLOCK = re.compile(r"<think>.*?</think>", re.S)
+
+
+def strip_thinking(text: str) -> str:
+    """``<think>…</think>`` を取り除く。考えるモデル以外には何も起きない。"""
+    text = _THINKING_BLOCK.sub("", text)
+    # 字数が尽きて閉じられなかった場合。答えはまだ書かれていないので、
+    # 考えの途中を見せるより空で返す（呼び出し側が字数を増やせば済む）。
+    unclosed = text.find("<think>")
+    if unclosed != -1:
+        text = text[:unclosed]
+    return text.strip()
 
 
 def _dtype_keyword(pipeline) -> str:
@@ -189,7 +230,9 @@ class Ai:
         result = await self._call_host(
             "ai-ask", json.dumps({"prompt": str(prompt), "max_tokens": max_tokens})
         )
-        return result.get("text", "")
+        # 本体側でも削ってもらう約束だが、こちらでも通す。本体が削り忘れても
+        # 両方の経路で同じ結果になるようにするため（二重にかけても何も起きない）。
+        return strip_thinking(result.get("text", ""))
 
     # --- Colab 経路（transformers + torch） --------------------------------
 
@@ -217,11 +260,32 @@ class Ai:
         where = "GPU" if device == 0 else "CPU"
         return f"準備ができました（{MODELS[base]['label']}／{where}で動きます）"
 
+    def _build_input(self, messages: list[dict]):
+        """モデルに渡すものを組み立てる。
+
+        考えるモデルには「考えを書かないで」と頼んだうえで渡す。頼めない古い
+        テンプレートのときは、そのまま渡して後から削る（``strip_thinking``）。
+        """
+        if not MODELS[self._name].get("has_thinking"):
+            return messages
+        tokenizer = getattr(self._pipe, "tokenizer", None)
+        if tokenizer is None:
+            return messages
+        try:
+            return tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=False,
+            )
+        except (TypeError, ValueError):
+            return messages
+
     def _ask_with_transformers(self, prompt: object, max_tokens: int | None) -> str:
         # 生成の設定はブラウザ側と揃えてある。小さなモデルはばらつきを大きくすると
         # 意味の通らない文章になりやすいので、温度を下げ繰り返しを抑える。
         out = self._pipe(
-            [{"role": "user", "content": str(prompt)}],
+            self._build_input([{"role": "user", "content": str(prompt)}]),
             max_new_tokens=max_tokens or 256,
             temperature=0.3,
             top_p=0.9,
@@ -233,7 +297,7 @@ class Ai:
         # 会話形式で渡すと返り値も会話の並びになる。最後の発言を取り出す。
         if isinstance(text, list):
             text = (text[-1] or {}).get("content", "") if text else ""
-        return str(text).strip()
+        return strip_thinking(str(text))
 
 
 ai = Ai()

@@ -176,6 +176,100 @@ def test_every_model_records_where_it_comes_from(name):
     assert "/" in spec["browser_repo"], "ブラウザ側は 配布元/名前 の形で書くこと"
 
 
+# --- 考えている途中を隠す ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("<think>まず数える</think>答えは3です", "答えは3です"),
+        ("<think>あ</think>\n\n答え", "答え"),
+        ("<think>1</think>A<think>2</think>B", "AB"),
+        ("<think>改行を\nまたぐ</think>答え", "答え"),
+        # 字数が尽きて閉じられなかった。考えの途中は見せない
+        ("<think>まだ考えている途中で", ""),
+        ("答えは3です<think>続きを考え", "答えは3です"),
+        # 考えないモデルの出力は素通し
+        ("ふつうの答え", "ふつうの答え"),
+        ("", ""),
+    ],
+)
+def test_thinking_is_hidden(raw, expected):
+    assert _ai.strip_thinking(raw) == expected
+
+
+def test_stripping_twice_changes_nothing():
+    """本体が削ったあとに、こちらでもう一度通しても壊れない。"""
+    once = _ai.strip_thinking("<think>考え</think>答え")
+    assert _ai.strip_thinking(once) == once == "答え"
+
+
+def test_browser_path_hides_thinking_even_if_the_host_forgets(fresh_ai, in_browser):
+    """本体が削り忘れても、利用者に見える文章は Colab 経路と同じになる。"""
+    in_browser.replies["ai-ask"] = {"text": "<think>考え</think>答えは3です"}
+    assert run(fresh_ai.ask("2+1は？")) == "答えは3です"
+
+
+class _FakeTokenizer:
+    """``enable_thinking`` を受け付けるテンプレート。"""
+
+    def __init__(self) -> None:
+        self.seen: dict | None = None
+
+    def apply_chat_template(self, messages, **kwargs):
+        self.seen = kwargs
+        return "<|im_start|>" + messages[-1]["content"]
+
+
+class _OldTokenizer:
+    """``enable_thinking`` を知らない古いテンプレート。"""
+
+    def apply_chat_template(self, messages, **kwargs):
+        if "enable_thinking" in kwargs:
+            raise TypeError("enable_thinking なんて知らない")
+        return "古い形式"
+
+
+def _pipe_with(tokenizer):
+    def pipe(prompt, **kwargs):
+        pipe.given = prompt
+        return [{"generated_text": "<think>考え</think>答え"}]
+
+    pipe.tokenizer = tokenizer
+    return pipe
+
+
+def test_thinking_models_are_asked_not_to_think(fresh_ai):
+    tokenizer = _FakeTokenizer()
+    fresh_ai._pipe = _pipe_with(tokenizer)
+    fresh_ai._name = "qwen3_06"  # has_thinking のモデル
+
+    assert fresh_ai._ask_with_transformers("2+1は？", None) == "答え"
+    assert tokenizer.seen["enable_thinking"] is False
+    assert tokenizer.seen["add_generation_prompt"] is True
+
+
+def test_old_templates_fall_back_to_plain_messages(fresh_ai):
+    """``enable_thinking`` が通らない版でも、削り取りだけで同じ結果になる。"""
+    fresh_ai._pipe = _pipe_with(_OldTokenizer())
+    fresh_ai._name = "qwen3_06"
+
+    assert fresh_ai._ask_with_transformers("2+1は？", None) == "答え"
+    # テンプレートを諦めたので、会話の形のまま渡っている
+    assert fresh_ai._pipe.given == [{"role": "user", "content": "2+1は？"}]
+
+
+def test_models_without_thinking_are_left_alone(fresh_ai):
+    """考えないモデルにテンプレートを差し込まない（余計なことをしない）。"""
+    tokenizer = _FakeTokenizer()
+    fresh_ai._pipe = _pipe_with(tokenizer)
+    fresh_ai._name = "qwen05"
+
+    fresh_ai._ask_with_transformers("2+1は？", None)
+    assert tokenizer.seen is None
+    assert fresh_ai._pipe.given == [{"role": "user", "content": "2+1は？"}]
+
+
 def test_every_browser_variant_maps_to_a_base():
     """本体の一覧（qwen05-q8 / qwen05-q4 / qwen15-q4 / llmjp150m-q4）を全部受けられる。"""
     for key in ["qwen05-q8", "qwen05-q4", "qwen15-q4", "llmjp150m-q4"]:
