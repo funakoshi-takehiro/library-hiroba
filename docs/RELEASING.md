@@ -5,7 +5,12 @@ GitHub Actions と PyPI が直接信頼関係を結ぶ Trusted Publishing のし
 準備は最初の1回だけです。2回目以降はタグを打つだけで公開されます。
 
 > **`ui-hiroba` から改名したときの注意**
-> Trusted Publisher はプロジェクト名ごとの設定です。`ui-hiroba` 用に登録したものは `library-hiroba` には効きません。手順2をもう一度、新しい名前で行ってください。GitHub のリポジトリ名を変えた場合は、手順2の Repository name も新しい名前に合わせます（古い名前でもリダイレクトで push はできますが、Trusted Publishing の照合は名前が一致している必要があります）。
+>
+> Trusted Publisher はプロジェクト名ごとの設定です。`ui-hiroba` 用に登録したものは `library-hiroba` には効きません。手順2をもう一度、新しい名前で行ってください。
+>
+> **順番が大事です。GitHub のリポジトリ名を先に変えてから、手順2を行ってください。** 公開のとき、GitHub は「どのリポジトリから来たか」を実際の名前で名乗ります。登録した Repository name がそれと違うと `invalid-publisher` で止まります。古い名前のままでも push はリダイレクトされるので、気付きにくい取り違えです。
+>
+> 手順3（GitHub の環境 `pypi`）は、リポジトリ名を変えてもそのまま残るので作り直し不要です。`ui-hiroba` 用の登録は消さずに残しておいてかまいません（消すと `ui-hiroba` 側の追加公開ができなくなります）。
 
 ---
 
