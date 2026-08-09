@@ -4,10 +4,10 @@ Google Colab と PyHiroba で、同じコードが同じように動く教育向
 
 | 入口 | できること |
 |---|---|
-| `ui` | カード・クイズ・進捗バーといった部品を、ノートブックのセル出力にそのまま表示します |
+| `ui` | カード・クイズ・進捗バーといった部品を、ノートブックのセル出力に表示します |
 | `ai` | 小さな言語モデルを、その場（ブラウザまたはノートブック）で動かします |
 
-[PyHiroba](https://pyhiroba.weblab.t.u-tokyo.ac.jp/) は、インストールも登録も必要とせず、ブラウザだけで Python を学べる、日本の学校現場向けの学習環境です。
+[PyHiroba](https://pyhiroba.weblab.t.u-tokyo.ac.jp/) は、インストールも登録も必要とせず、ブラウザから Python を学べる、日本の学校現場向けの学習環境です。
 
 ```python
 from library_hiroba import ai, ui
@@ -23,24 +23,24 @@ ui.quiz("2の8乗はいくつ？", choices=[128, 256, 512], answer=256,
 
 ## 特徴
 
-用意された部品に加えて、HTML と CSS を自由に書けます。教材に必要な見た目は、たいていこの2つで作れます。
+用意された部品に加えて、HTML と CSS を自由に書けます。教材に必要な見た目の多くは、この2つで作れます。
 
 ```python
 ui.html('<div class="fukidashi">まずは print() を試してみよう</div>',
         css=".fukidashi { border: 2px solid var(--hui-accent); border-radius: 14px; padding: 10px 16px; }")
 ```
 
-CSS はその部品の内側だけに適用されるため、クラス名を気軽に付けてもページの他の部分に影響しません。ふきだし、手順ステップ、単語カード、横棒グラフといった見た目も、この方法で作れます。
+CSS が届く範囲はその部品の内側に限られるため、クラス名を気軽に付けてもページの他の部分に影響しません。ふきだし、手順ステップ、単語カード、横棒グラフといった見た目も、この方法で作れます。
 
 そのほかの特徴は次のとおりです。
 
 | 項目 | 内容 |
 |---|---|
 | 動作環境 | セル最後の式を `_repr_html_()` で表示する共通のしくみに乗るため、Colab と PyHiroba で表示が一致します |
-| 実装方式 | 表示も操作も HTML と CSS だけで完結します（クイズの正誤表示は `:checked`、開閉は `<details>`） |
-| 依存関係 | `ui` は純 Python で依存ライブラリがありません。配布物は `py3-none-any` の wheel で、Colab の pip でも Pyodide の micropip でも取得できます（`ai` を Colab で使うときだけ追加の依存が要ります） |
+| 実装方式 | 表示も操作も HTML と CSS で完結します（クイズの正誤表示は `:checked`、開閉は `<details>`） |
+| 依存関係 | `ui` は純 Python で、依存ライブラリがありません。配布物は `py3-none-any` の wheel で、Colab の pip でも Pyodide の micropip でも取得できます（`ai` を Colab で使うときは追加の依存が必要です） |
 | 見た目 | 配色・書体・角丸を PyHiroba 本体のデザインに合わせています |
-| 配慮 | 本文と状態色は WCAG 4.5:1 以上です（アクセント色を塗ったボタンの白文字だけは 3.87:1 で、UI 部品の基準 3:1 を満たします）。アニメーションは `prefers-reduced-motion` に従います |
+| 配慮 | 本文と状態色は WCAG 4.5:1 以上です（アクセント色を塗ったボタンの白文字は 3.87:1 で、UI 部品の基準 3:1 を満たします）。アニメーションは `prefers-reduced-motion` に従います |
 
 ## インストール
 
@@ -56,7 +56,7 @@ Colab で `ai` も使うときは、追加の依存（transformers と torch）�
 %pip install "library-hiroba[ai]"
 ```
 
-PyHiroba では、同梱されていれば `import library_hiroba` だけで使えます。`ai` の実行はブラウザ側の経路を使うので、追加のインストールは要りません。同梱前の環境では `!pip install library-hiroba` を実行すると micropip が PyPI から取得します。
+PyHiroba では、同梱されていれば `import library_hiroba` で使えます。`ai` の実行はブラウザ側の経路を使うので、追加のインストールは要りません。同梱前の環境では `!pip install library-hiroba` を実行すると micropip が PyPI から取得します。
 
 ## 部品一覧
 
@@ -76,10 +76,6 @@ PyHiroba では、同梱されていれば `import library_hiroba` だけで使�
 | 考え中の表示 | `ui.thinking("考え中")`（`ui.form()` が送信中に自動で出します） |
 | 会話の表示 | `ui.chat([{"role": "user", "content": "…"}, {"role": "assistant", "content": "…"}])` |
 
-> **外部への通信はありません。** 部品は PyHiroba と同じ書体（Zen Kaku Gothic New）を名前で指定しますが、**取りには行きません**。PyHiroba ではページ側が読み込み済みなので、それだけで見た目が揃います。持っていない環境（Colab など）では端末の書体になります。Colab でも同じ書体で揃えたい場合は `ui.use_web_font(True)` を呼んでください（そのぶん表示のたびに Google へ通信が起き、閲覧者の IP が渡ります）。`ai` を使う場合のモデル取得を除けば、ほかに外部へ通信する箇所はありません。
-
-> **クイズの答えについて。** `ui.quiz()` は JavaScript を使わず CSS だけで正誤を出しているため、**答えは出力の HTML に含まれます**。ブラウザの「ソースを表示」や検証ツールを開けば読めてしまうので、練習用に使ってください。成績をつけるテストには向きません。
-
 複数の部品は次のようにまとめます。
 
 ```python
@@ -88,6 +84,18 @@ ui.columns(ui.stat("得点", 90), ui.stat("順位", 3))        # 横に並べる
 ```
 
 セルの途中で表示したい場合は `ui.show(...)` を使います。Colab ではその場に表示され、IPython のない PyHiroba では部品を返すので、セル最後の式として置きます。
+
+### 外部への通信について
+
+部品を表示しても、外部との通信は起きません。書体は PyHiroba と同じ Zen Kaku Gothic New を名前で指定していますが、取りに行くことはしません。PyHiroba ではページ側が読み込み済みのため、これで見た目が揃います。書体を持っていない環境（Colab など）では、端末にある書体で表示されます。
+
+Colab でも同じ書体に揃えたい場合は `ui.use_web_font(True)` を呼んでください。この場合は表示のたびに Google へ通信が起き、閲覧者の IP アドレスが渡ります。
+
+`ai` がモデルを受け取るときを除けば、外部へ通信する箇所はありません。
+
+### クイズの答えについて
+
+`ui.quiz()` は JavaScript を使わず、CSS で正誤を表示しています。そのため、答えは出力の HTML に含まれます。ブラウザの「ソースを表示」や検証ツールを開くと読み取れるので、点数をつける試験ではなく、自分で確認するための練習に向いています。
 
 ## 入力を Python に戻す
 
@@ -111,7 +119,7 @@ ui.form(ask,
 |---|---|
 | Colab・Jupyter（ipywidgets あり） | テキスト欄とボタンの対話 UI。押すたびに関数が呼ばれます |
 | ipywidgets が無い環境 | `input()` で順に聞いて、結果を表示します |
-| PyHiroba | HTML のフォームを表示します。値を受け取るには本体側の対応が必要です（[`docs/PYHIROBA_FORMS.md`](https://github.com/funakoshi-takehiro/library-hiroba/blob/main/docs/PYHIROBA_FORMS.md) に設計案があります） |
+| PyHiroba | HTML のフォームを表示します。値を受け取るには本体側の対応が必要です（[`docs/PYHIROBA_FORMS.md`](https://github.com/funakoshi-takehiro/library-hiroba/blob/main/docs/PYHIROBA_FORMS.md) に設計をまとめています） |
 
 先生が書くコードは1つで済み、環境ごとの切り替えは不要です。
 
@@ -119,7 +127,7 @@ ui.form(ask,
 
 `ui.chat()` は会話を吹き出しで並べます。役割は `user` / `assistant` / `note` の3つで、`content` には文字列のほか他の部品も入れられます。
 
-会話を変数にためて `ui.chat()` を返すようにすると、1つのセルだけでチャットができます。`clear_on_submit=True` を付けると、送信のたびに入力欄が空になります。
+会話を変数にためて `ui.chat()` を返すようにすると、1つのセルでチャットができます。`clear_on_submit=True` を付けると、送信のたびに入力欄が空になります。
 
 ```python
 history = []
@@ -135,20 +143,20 @@ ui.form(ask, ui.field("question", label="質問"),
 
 ## AI（小さな言語モデル）
 
-`ai` は、小さな言語モデルをその場で動かします。メソッドは4つだけです。
+`ai` は、小さな言語モデルをその場で動かします。メソッドは4つです。
 
 ```python
 from library_hiroba import ai
 
 await ai.models()                  # 選べるモデルの一覧
-await ai.load()                    # モデルを読み込む（初回だけ時間がかかります）
+await ai.load()                    # モデルを読み込む（初回は時間がかかります）
 print(await ai.ask("日本の四季について、2行で書いて"))
 
 async for chunk in ai.stream("俳句を1つ"):   # 書けたぶんから受け取る
     print(chunk, end="")
 ```
 
-`await` が必要です。ノートブック（Colab / Jupyter / PyHiroba）では、セルの中にそのまま `await` を書けます。PyHiroba は GitHub Pages 配信のため `SharedArrayBuffer` を使った同期待ちができず、ブラウザ側は待つ形にせざるを得ません。Colab 側は待つ必要がありませんが、**同じコードが両方で動く**ことを優先して形を揃えています。
+`await` が必要です。ノートブック（Colab / Jupyter / PyHiroba）では、セルの中にそのまま `await` を書けます。PyHiroba は GitHub Pages 配信のため `SharedArrayBuffer` を使った同期待ちができず、ブラウザ側は待つ形にせざるを得ません。Colab 側は待つ必要がありませんが、同じコードが両方で動くことを優先して形を揃えています。
 
 `ask()` には `max_tokens` を渡せます（既定は 256）。
 
@@ -163,7 +171,7 @@ print(await ai.ask("俳句を1つ作って", max_tokens=64))
 | PyHiroba | ブラウザの中で動きます（本体が用意した経路を使います） | なし |
 | Colab・Jupyter | `transformers` と `torch` で動きます | `%pip install "library-hiroba[ai]"` |
 
-どちらの経路でも、入力した文章が外部に送られることはありません。通信が起きるのはモデルを受け取るときだけです。
+どちらの経路でも、入力した文章が外部に送られることはありません。通信が起きるのは、モデルを受け取るときに限られます。
 
 ### 選べるモデル
 
@@ -185,7 +193,7 @@ await ai.load("llmjp150m")
 
 ブラウザ側は同じモデルを精度違いで並べるため `qwen05-q8` のように末尾が付いた名前も使えます。精度まで指定したいときはそちらを、そうでなければ上の共通の名前を使ってください。共通の名前はどちらの環境でも通ります。
 
-一覧が短いのは、**PyHiroba と Colab の両方で動くものだけ**を載せているためです。ブラウザは ONNX に変換されたモデルしか読めないので、そこが上限になります。増やすときの調べ方は [`docs/PYHIROBA_INTEGRATION.md`](docs/PYHIROBA_INTEGRATION.md) の「モデルを増やすとき」にあります。
+一覧が短いのは、PyHiroba と Colab の両方で動くものを載せているためです。ブラウザは ONNX に変換されたモデルを読み込むしくみのため、そこが上限になります。増やすときの調べ方は [`docs/PYHIROBA_INTEGRATION.md`](https://github.com/funakoshi-takehiro/library-hiroba/blob/main/docs/PYHIROBA_INTEGRATION.md) の「モデルを増やすとき」にあります。
 
 ### チャットとして表示する
 
@@ -208,13 +216,13 @@ ui.form(ask, ui.field("question", label="質問"),
 
 入力を Python に戻す経路は環境によって変わるため、この組み合わせが動くのは今のところ Colab・Jupyter です（PyHiroba は本体側の対応待ちです）。
 
-送信を押すと、答えが返るまで**「考え中」の点が動きます**（自動）。言葉を変えるときは `pending="AI が考えています"`、出さないときは `pending=None` を渡してください。
+送信を押すと、答えが返るまで「考え中」の点が動きます。言葉を変えるときは `pending="AI が考えています"`、出さないときは `pending=None` を渡してください。
 
 はじめに `await ai.load()` を済ませておくと、1通目でモデルの読み込み（数十秒〜）を待たされずに済みます。
 
 ### 書けたところから少しずつ出す
 
-`ai.stream()` は、答えを**書けたぶんから**返します。`handler` を `yield` で書くと、届くたびに表示が差し替わります。
+`ai.stream()` は、答えを書けたぶんから返します。`handler` を `yield` で書くと、届くたびに表示が差し替わります。
 
 ```python
 history = []
@@ -233,7 +241,7 @@ ui.form(talk, ui.field("question", label="質問"),
         submit_label="送信", clear_on_submit=True)
 ```
 
-`ai.stream()` を全部つなげると `ai.ask()` と同じ文になります。**少しずつ返せない環境では、書き終えてから一度にまとめて返します** — どちらでも同じコードが動きます。考えている途中（`<think>`）は、途中で切れても取り除かれます。
+`ai.stream()` を全部つなげると `ai.ask()` と同じ文になります。少しずつ返せない環境では、書き終えてから一度にまとめて返すため、どちらでも同じコードが動きます。考えている途中（`<think>`）は、途中で切れても取り除かれます。
 
 モデルのライセンスは配布元をご確認ください（既定の Qwen2.5 は Apache-2.0）。
 
@@ -244,13 +252,13 @@ ui.form(talk, ui.field("question", label="質問"),
 | 項目 | 値 |
 |---|---|
 | ブランドカラー | `#028DAE`（ダーク時 `#35aecb`） |
-| 書体 | Zen Kaku Gothic New（名前で指定するだけで、取りには行きません）。PyHiroba ではページ側が持っているため揃います。持っていない環境では `system-ui` になります |
+| 書体 | Zen Kaku Gothic New を名前で指定しています。PyHiroba ではページ側が持っているため揃います。持っていない環境では `system-ui` になります |
 | 角丸 | カード 14px、行とアラート 8px、バッジと進捗バー 999px |
 | 記号 | 文字記号（`i` `✓` `!` `×`）を CSS の円形マークに載せて表します |
 
 ### テーマ
 
-既定はライトです。ダークになるのは、祖先要素に `data-theme="dark"` が付いているとき、すなわち PyHiroba でダークモードに切り替えたときだけです。OS の配色設定は参照しません。これは PyHiroba 本体と同じ方針で、ページがライト表示のまま部品だけが暗くなる食い違いを避けるためです。
+既定はライトです。ダークになるのは、祖先要素に `data-theme="dark"` が付いているとき、すなわち PyHiroba でダークモードに切り替えたときです。OS の配色設定は参照しません。これは PyHiroba 本体と同じ方針で、ページがライト表示のまま部品が暗くなる食い違いを避けるためです。
 
 背景を持つ部品は不透明な色で塗ってあるので、ページの下地が何色でも文字と背景の組み合わせが保たれます。背景を持たない部分（進捗バーのラベルや表のキャプション）はページの文字色を受け継ぎ、暗いページでも読めます。
 
@@ -273,17 +281,13 @@ ui.html('<div class="box">ヒント</div>',
 | 面 | `--hui-paper` / `--hui-bg-2` / `--hui-line` |
 | 形 | `--hui-radius` / `--hui-radius-sm` / `--hui-shadow` |
 
-書体は Google Fonts から読み込みます。オフラインや閉域網では `system-ui` に切り替わるだけで、表示は保たれます。外部との通信を完全になくす場合は、`src/library_hiroba/_css.py` の `FONT_IMPORT` を空文字にします。
-
 ## しくみと範囲
 
-各部品は、必要な CSS を同梱した自己完結の HTML を返します。同じ CSS が何度出力されても表示は変わりません。渡したテキストはすべて HTML エスケープされ、改行は `<br>` になります。エスケープしない経路は `ui.html()` だけです。
+各部品は、必要な CSS を同梱した自己完結の HTML を返します。同じ CSS が何度出力されても表示は変わりません。渡したテキストはすべて HTML エスケープされ、改行は `<br>` になります。エスケープしない経路は `ui.html()` です。
 
 部品の表示と CSS による操作は、どの環境でも同じように動きます。入力を Python に戻す `ui.form()` は環境によって経路が変わり、PyHiroba では本体側の対応を待っています。
 
 `ai` も環境によって経路が変わります。PyHiroba では本体が用意した経路を通し、Colab では `transformers` を使います。書き方は同じですが、動くモデルの実体と読み込みにかかる時間は環境で違います。`ui` は純 Python のままで、`ai` を使わないかぎり追加の依存は読み込まれません。
-
-クイズの正解は HTML の class として含まれるため、成績評価ではなく学習用の自己チェックに向いています。
 
 ## 開発
 
