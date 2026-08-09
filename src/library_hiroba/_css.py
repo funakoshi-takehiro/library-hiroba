@@ -39,22 +39,29 @@ def _minify(css: str) -> str:
 # PyHiroba 本体と同じ書体。読み込めない環境（オフライン・閉域網）では
 # 自動的に system-ui にフォールバックするため、表示は崩れない。
 #
-# これは部品が唯一、外に取りに行くもの。部品を表示するたびに Google へ
-# 通信が発生し、閲覧者の IP が相手に渡る。児童生徒が使う教材でそれを避けたい
-# 場合のために、use_web_font(False) で切れるようにしてある。
+# これは部品が唯一、外に取りに行くもの。既定では取りに行かない。
+#
+# PyHiroba は出力をページと同じ document に挿すので、ページが読み込み済みの
+# 書体が下の font-family でそのまま効く。@import は要らない。
+# 一方 Colab の出力は隔離された iframe で、ページの書体は届かない。つまり
+# この @import が実際に効くのは Colab だけだが、そちらは PyHiroba と
+# 揃っている必要がない。効く場所と必要な場所が食い違っているうえ、表示の
+# たびに Google へ通信が起きて閲覧者の IP が渡る。既定は切ってある。
+# Colab でも同じ書体にしたい場合は use_web_font(True) を呼ぶ。
 FONT_IMPORT = (
     "@import url('https://fonts.googleapis.com/css2?"
     "family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap');"
 )
 
-_use_web_font = True
+_use_web_font = False
 
 
 def use_web_font(enabled: bool) -> None:
-    """書体を Google Fonts から取りに行くかどうかを決める。
+    """書体を Google Fonts から取りに行くかどうかを決める（既定は取りに行かない）。
 
-    ``False`` にすると、以後に作る部品の CSS から ``@import`` が外れ、
-    **外部への通信が一切なくなる**。書体は端末にあるもの（system-ui）になる。
+    PyHiroba ではページ側が同じ書体を持っているため、既定のままで見た目が揃う。
+    Colab でも同じ書体にしたいときだけ ``True`` を渡す（そのぶん表示のたびに
+    Google へ通信が発生し、閲覧者の IP が渡る点に注意）。
     """
     global _use_web_font
     _use_web_font = bool(enabled)

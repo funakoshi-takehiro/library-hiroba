@@ -35,8 +35,9 @@ PyHiroba 本体は library-hiroba を同梱（vendoring）して配ります。�
 ### 守っていること
 
 - **`ui` 側は純 Python・標準ライブラリだけ**です（`_core` / `_css` / `_components` / `_forms` / `ui`）。閉じた校内ネットワークでも、**パッケージの追加取得なしに**動きます。この約束はテストで固定してあります（`tests/test_ai.py::test_ui_stays_dependency_free`）
-- ただし**表示のときに1つだけ外へ取りに行くものがあります**。CSS の先頭にある Google Fonts の `@import`（PyHiroba 本体と同じ書体）で、部品を表示するたびに通信が起き、閲覧者の IP が Google に渡ります。読み込めない環境では `system-ui` に落ちるため表示は崩れません。切りたい場合は `ui.use_web_font(False)` を呼ぶと `@import` ごと出力から外れます。取得先がこれだけであることもテストで固定してあります（`tests/test_components.py::test_the_font_is_the_only_thing_fetched_from_outside`）
-  - PyHiroba 本体はページ自体がこの書体を読み込んでいるはずなので、本体側で既に読み込んでいるなら、同梱時に既定を `False` にすることも検討してください
+- **書体は取りに行きません**。CSS は `font-family: 'Zen Kaku Gothic New', system-ui, sans-serif` と名前で指定するだけです。PyHiroba は出力をページと同じ document に挿すため、**本体がこの書体を読み込んでいれば、それだけで揃います**。本体側で読み込んでいない場合は `system-ui` になるので、揃えたいときは本体のページ側で読み込んでください（library-hiroba 側では取得しません）
+  - 以前は CSS の先頭に Google Fonts の `@import` を入れていましたが、外しました。PyHiroba では本体が持っているぶん不要で、実際に効くのは Colab（隔離 iframe でページの書体が届かない）だけです。そちらは PyHiroba と揃っている必要がない一方、表示のたびに Google へ通信が起き閲覧者の IP が渡るため、既定では行いません。Colab で揃えたい利用者は `ui.use_web_font(True)` を呼べます
+  - 取得先が増えていないことはテストで固定してあります（`tests/test_components.py::test_nothing_is_fetched_by_default`）
 - **`ai` は使われるまで読み込みません**。`from library_hiroba import ui` だけなら `_ai.py` は読み込まれません
 - `_ai.py` はブラウザでは `js` しか使いません。`transformers` / `torch` を読み込むのは Colab 経路に入ったときだけです
 

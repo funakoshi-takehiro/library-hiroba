@@ -67,8 +67,10 @@ def test_no_emoji_in_default_output():
 
 def test_pyhiroba_design_tokens_and_font():
     rendered = ui.card("題")._repr_html_()
-    assert "Zen Kaku Gothic New" in rendered  # PyHiroba と同じ書体
-    assert "fonts.googleapis.com" in rendered  # 未読込環境向けの @import（失敗時は system-ui）
+    # 書体は名前で指定する。PyHiroba はページ側が読み込み済みなのでこれで揃い、
+    # 持っていない環境（Colab など）は system-ui に落ちる。取りには行かない。
+    assert "Zen Kaku Gothic New" in rendered
+    assert "fonts.googleapis.com" not in rendered
     assert "#028DAE" in rendered  # ライトのブランドティール
     assert "#35aecb" in rendered  # ダークのブランドティール
     assert re.search(r'font-feature-settings:\s*"palt"', rendered)
@@ -416,25 +418,27 @@ def test_the_font_is_the_only_thing_fetched_from_outside():
     assert [u for u in urls if "fonts.googleapis.com" not in u] == []
 
 
-def test_use_web_font_false_removes_all_outside_traffic():
-    """児童生徒の閲覧を外部に知らせたくない場合の逃げ道。"""
+def test_nothing_is_fetched_by_default():
+    """既定では外部への通信が一切起きないこと。
+
+    PyHiroba ではページ側が同じ書体を持っているので、取りに行かなくても揃う。
+    効くのは Colab だけで、そちらは揃っている必要がない。
+    """
+    rendered = ui.card("目標", "本文")._repr_html_()
+    assert "@import" not in rendered
+    assert "googleapis" not in rendered
+    # 見た目の土台は残っている（CSS ごと落としていない）
+    assert ".hui-card" in rendered
+    assert "--hui-accent" in rendered
+    # 書体の指定そのものは残す。PyHiroba 側が持っていればこれで揃う
+    assert "Zen Kaku Gothic New" in rendered
+
+
+def test_the_font_can_be_turned_on_for_colab():
     from library_hiroba import ui as _ui
 
     try:
-        _ui.use_web_font(False)
-        rendered = _ui.card("目標", "本文")._repr_html_()
-        assert "@import" not in rendered
-        assert "googleapis" not in rendered
-        # 見た目の土台は残っている（CSS ごと落としていない）
-        assert ".hui-card" in rendered
-        assert "--hui-accent" in rendered
-    finally:
         _ui.use_web_font(True)
-
-
-def test_the_font_comes_back_when_turned_on():
-    from library_hiroba import ui as _ui
-
-    _ui.use_web_font(False)
-    _ui.use_web_font(True)
-    assert "fonts.googleapis.com" in _ui.card("a")._repr_html_()
+        assert "fonts.googleapis.com" in _ui.card("a")._repr_html_()
+    finally:
+        _ui.use_web_font(False)
