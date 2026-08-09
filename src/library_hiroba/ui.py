@@ -36,6 +36,7 @@ from ._components import (
     table,
 )
 from ._core import Widget, show
+from ._css import use_web_font
 from ._forms import field, form, get_form
 
 __all__ = [
@@ -56,4 +57,5 @@ __all__ = [
     "stack",
     "stat",
     "table",
+    "use_web_font",
 ]

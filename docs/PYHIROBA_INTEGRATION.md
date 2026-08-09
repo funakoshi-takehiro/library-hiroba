@@ -34,7 +34,9 @@ PyHiroba 本体は library-hiroba を同梱（vendoring）して配ります。�
 
 ### 守っていること
 
-- **`ui` 側は純 Python・標準ライブラリだけ**です（`_core` / `_css` / `_components` / `_forms` / `ui`）。閉じた校内ネットワークでも、追加の取得なしに動きます。この約束はテストで固定してあります（`tests/test_ai.py::test_ui_stays_dependency_free`）
+- **`ui` 側は純 Python・標準ライブラリだけ**です（`_core` / `_css` / `_components` / `_forms` / `ui`）。閉じた校内ネットワークでも、**パッケージの追加取得なしに**動きます。この約束はテストで固定してあります（`tests/test_ai.py::test_ui_stays_dependency_free`）
+- ただし**表示のときに1つだけ外へ取りに行くものがあります**。CSS の先頭にある Google Fonts の `@import`（PyHiroba 本体と同じ書体）で、部品を表示するたびに通信が起き、閲覧者の IP が Google に渡ります。読み込めない環境では `system-ui` に落ちるため表示は崩れません。切りたい場合は `ui.use_web_font(False)` を呼ぶと `@import` ごと出力から外れます。取得先がこれだけであることもテストで固定してあります（`tests/test_components.py::test_the_font_is_the_only_thing_fetched_from_outside`）
+  - PyHiroba 本体はページ自体がこの書体を読み込んでいるはずなので、本体側で既に読み込んでいるなら、同梱時に既定を `False` にすることも検討してください
 - **`ai` は使われるまで読み込みません**。`from library_hiroba import ui` だけなら `_ai.py` は読み込まれません
 - `_ai.py` はブラウザでは `js` しか使いません。`transformers` / `torch` を読み込むのは Colab 経路に入ったときだけです
 

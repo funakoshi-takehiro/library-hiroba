@@ -15,6 +15,7 @@ from ._core import (
     Item,
     Stack,
     Widget,
+    css_length,
     esc,
     esc_attr,
     shown,
@@ -250,16 +251,14 @@ class Columns(Container):
             if any(w <= 0 for w in widths):
                 raise ValueError(f"widths は正の数にしてください（指定値: {widths!r}）")
         self.widths = widths
-        self.gap = gap
+        self.gap = css_length(gap, "gap")
 
     def fragment(self) -> str:
         cols = []
         for i, child in enumerate(self.children):
             style = f' style="flex: {self.widths[i]:.4g} 1 0;"' if self.widths else ""
             cols.append(f'<div class="hui-col"{style}>{child.fragment()}</div>')
-        return (
-            f'<div class="hui-cols" style="gap: {esc_attr(self.gap)};">{"".join(cols)}</div>'
-        )
+        return f'<div class="hui-cols" style="gap: {self.gap};">{"".join(cols)}</div>'
 
 
 class Badge(Widget):
@@ -295,6 +294,10 @@ class Table(Widget):
                 'ui.table([{"名前": "佐藤"}]) のようにリストで囲みます。'
             )
         rows = list(data)
+        # headers は下で何度もなぞる。生成器のまま受け取ると最初の1行で尽きて、
+        # 2行目以降が黙って空欄になる（表示は出るので気付けない）。先に確定させる。
+        if headers is not None:
+            headers = list(headers)
         if not rows:
             raise ValueError("data が空です")
 

@@ -130,9 +130,9 @@ def resolve(name: str | None) -> tuple[str, str]:
 _THINKING_BLOCK = re.compile(r"<think>.*?</think>", re.S)
 
 
-def strip_thinking(text: str) -> str:
+def strip_thinking(text: object) -> str:
     """``<think>…</think>`` を取り除く。考えるモデル以外には何も起きない。"""
-    text = _THINKING_BLOCK.sub("", text)
+    text = _THINKING_BLOCK.sub("", str(text))
     # 字数が尽きて閉じられなかった場合。答えはまだ書かれていないので、
     # 考えの途中を見せるより空で返す（呼び出し側が字数を増やせば済む）。
     unclosed = text.find("<think>")
@@ -208,12 +208,28 @@ class Ai:
     # やり取りは JSON 文字列だけ（Pyodide と JS の境界を単純に保つため）。
     # kind は本体の許可リストにある ai-load / ai-ask / ai-models の3つのみ。
 
-    async def _call_host(self, kind: str, args_json: str):
+    async def _call_host(self, kind: str, args_json: str) -> dict:
         import json
 
         import js
 
-        return json.loads(await js.pyhirobaAsk(kind, args_json))
+        raw = await js.pyhirobaAsk(kind, args_json)
+        # 本体が壊れた応答を返したときに、JSONDecodeError や
+        # 「'list' object has no attribute 'get'」のような、利用者には意味の
+        # 分からない例外で止まらないようにする。原因の見当がつく文言にする。
+        try:
+            result = json.loads(raw)
+        except (TypeError, ValueError) as error:
+            raise RuntimeError(
+                f"PyHiroba 本体からの返事を読み取れませんでした（{kind}）。"
+                f"本体側の不具合の可能性があります。返ってきた内容: {str(raw)[:80]!r}"
+            ) from error
+        if not isinstance(result, dict):
+            raise RuntimeError(
+                f"PyHiroba 本体からの返事の形が違います（{kind}）。"
+                f"{{…}} の形を期待しましたが {type(result).__name__} でした。"
+            )
+        return result
 
     async def _load_in_browser(self, browser_key: str) -> str:
         import json

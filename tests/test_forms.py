@@ -332,3 +332,39 @@ def test_choice_default_matches_across_paths():
     field = ui.field("size", kind="choice", choices=["小", "大"])
     assert field.default == "小"
     assert 'value="小" selected' in field.control_html()
+
+
+# --- 監査で見つかった取りこぼし -------------------------------------------
+
+
+def test_multiline_default_keeps_its_line_breaks():
+    """textarea の中身はタグとして解釈されない。
+
+    改行を <br> にすると「<br>」という文字がそのまま見えてしまう。
+    """
+    rendered = ui.field("memo", kind="multiline", default="1行目\n2行目").fragment()
+    assert "<br>" not in rendered
+    assert "1行目\n2行目" in rendered
+
+
+def test_multiline_default_is_still_escaped():
+    rendered = ui.field("memo", kind="multiline", default="</textarea><script>x</script>").fragment()
+    assert "<script" not in rendered
+    assert "&lt;/textarea&gt;" in rendered
+
+
+@pytest.mark.parametrize("name", ["class", "for", "if", "lambda", "None", "import"])
+def test_python_keywords_are_rejected_as_field_names(name):
+    """予約語は handler の引数にできない。
+
+    以前は field() を通り、ボタンを押した時点で初めて
+    「handler() got an unexpected keyword argument 'class'」になっていた。
+    書いた本人には原因が分からないので、作る時点で止める。
+    """
+    with pytest.raises(ValueError, match="予約語"):
+        ui.field(name)
+
+
+@pytest.mark.parametrize("name", ["class_", "組", "answer", "x2"])
+def test_ordinary_names_still_work(name):
+    assert ui.field(name).name == name

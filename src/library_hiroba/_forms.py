@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import keyword
 from collections.abc import Sequence
 from typing import Callable, Union
 
@@ -28,6 +29,9 @@ FieldLike = Union["Field", str]
 # 教材を長く開いたままでも増え続けないよう、古いものから捨てる。
 _REGISTRY: dict[str, Form] = {}
 _REGISTRY_LIMIT = 64
+
+# 表示待ちの処理。回収されないよう、終わるまでここで持つ（display_result 参照）
+_PENDING: set = set()
 
 
 def get_form(form_id: str) -> Form | None:
@@ -60,6 +64,14 @@ class Field:
     ):
         if not name.isidentifier():
             raise ValueError(f"name は Python の変数名として使える文字にしてください（指定値: {name!r}）")
+        # class・for・if などは変数名の形をしているが、handler の引数にはできない。
+        # ここで止めないと、ボタンを押した時点で初めて TypeError になり、
+        # 書いた本人には何が悪いのか分からない。
+        if keyword.iskeyword(name):
+            raise ValueError(
+                f"name に Python の予約語は使えません（指定値: {name!r}）。"
+                f"handler の引数にできないためです。{name}_ のように少し変えてください。"
+            )
         if kind not in self.KINDS:
             raise ValueError(f"kind は {list(self.KINDS)} のいずれかにしてください（指定値: {kind!r}）")
         if kind == "choice" and not choices:
@@ -82,7 +94,9 @@ class Field:
         placeholder = f' placeholder="{esc_attr(self.placeholder)}"' if self.placeholder else ""
         value = esc_attr(self.default) if self.default != "" else ""
         if self.kind == "multiline":
-            return f"<textarea {common} rows=\"3\"{placeholder}>{esc(self.default)}</textarea>"
+            # ここは esc（改行を <br> にする）を使わない。textarea の中身はタグとして
+            # 解釈されないので、<br> がそのまま「<br>」という文字で見えてしまう。
+            return f"<textarea {common} rows=\"3\"{placeholder}>{esc_attr(self.default)}</textarea>"
         if self.kind == "choice":
             options = "".join(
                 f'<option value="{esc_attr(c)}"'
@@ -164,8 +178,13 @@ def display_result(result: object, into: object = None) -> None:
         # ノートブックの外（素の Python）。回っているループが無いので自分で回す
         asyncio.run(wait_then_show())
     else:
-        # ノートブックの中。ループに載せて、終わったときに表示する
-        asyncio.ensure_future(wait_then_show())  # noqa: RUF006 — 表示したら終わる使い捨て
+        # ノートブックの中。ループに載せて、終わったときに表示する。
+        # 参照を持たないと、待っている最中に回収されて結果が出ないことがある
+        # （ループはタスクを弱参照でしか持たない）。AI の返事は数秒かかるので、
+        # 終わるまで手元で持っておき、終わったら捨てる。
+        task = asyncio.ensure_future(wait_then_show())
+        _PENDING.add(task)
+        task.add_done_callback(_PENDING.discard)
 
 
 class Form(Widget):

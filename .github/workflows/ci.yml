@@ -5,6 +5,10 @@ on:
     branches: ["main", "claude/**"]
   pull_request:
 
+# 読むだけでよい。既定のままだと、ここで動くものに書き込み権限まで渡ることがある
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest

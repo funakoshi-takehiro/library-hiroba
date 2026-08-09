@@ -13,6 +13,7 @@ PyHiroba は script・イベント属性(on*)・iframe・form などを出力か
 
 from __future__ import annotations
 
+import re
 from html.parser import HTMLParser
 
 FORBIDDEN_TAGS = frozenset(
@@ -32,6 +33,14 @@ FORBIDDEN_TAGS = frozenset(
 )
 
 URL_ATTRS = frozenset({"href", "src", "action", "formaction", "xlink:href", "data"})
+
+# style 属性に書いてよいプロパティ。エスケープを抜けなくても、値の途中に
+# 「;」で別の宣言を継ぎ足せば画面を覆う要素や外部への通信を作れてしまうため、
+# 部品が実際に使うものだけに絞る。増やすときはここも直す。
+ALLOWED_STYLE_PROPS = frozenset({"gap", "flex", "width"})
+
+# 1つの宣言。丸括弧（url(...) など）と、値を終わらせる記号を認めない。
+STYLE_DECL = re.compile(r"^\s*([a-zA-Z-]+)\s*:\s*([^;{}()<>\"']*?)\s*$")
 
 VOID_TAGS = frozenset(
     {
@@ -70,6 +79,23 @@ class _Checker(HTMLParser):
                 normalized = "".join(value.split()).lower()
                 if normalized.startswith("javascript:"):
                     self.violations.append(f"<{tag} {name}> が javascript: URL")
+            if lowered == "style" and value is not None:
+                self._check_style(tag, value)
+
+    def _check_style(self, tag: str, style: str) -> None:
+        for declaration in style.split(";"):
+            if not declaration.strip():
+                continue
+            matched = STYLE_DECL.match(declaration)
+            if matched is None:
+                self.violations.append(f"<{tag} style> に読めない宣言がある: {declaration.strip()!r}")
+                continue
+            prop = matched.group(1).lower()
+            if prop not in ALLOWED_STYLE_PROPS:
+                self.violations.append(
+                    f"<{tag} style> に許していないプロパティ {prop} がある"
+                    f"（許しているのは {sorted(ALLOWED_STYLE_PROPS)}）"
+                )
 
     def handle_starttag(self, tag: str, attrs) -> None:
         if tag in FORBIDDEN_TAGS:

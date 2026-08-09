@@ -380,3 +380,61 @@ def test_css_is_minified_but_intact():
         assert token in BASE_CSS
     quiz = ui.quiz("q", ["a", "b"], "a")._repr_html_()
     assert "@supports" in quiz and "@media" in quiz  # @ルールは壊れていない
+
+
+# --- 監査で見つかった取りこぼし -------------------------------------------
+
+
+def test_headers_may_be_any_sequence():
+    """headers を何度もなぞるので、生成器で渡されても結果が変わらないこと。
+
+    以前は最初の1行で尽きて、2行目以降が黙って空欄になっていた。表は出るので
+    気付けず、生徒の点数が消えたまま配られてしまう。
+    """
+    rows = [{"名前": "佐藤", "点": 90}, {"名前": "鈴木", "点": 85}]
+    from_list = ui.table(rows, headers=["名前", "点"])._repr_html_()
+    from_generator = ui.table(rows, headers=(h for h in ["名前", "点"]))._repr_html_()
+    from_tuple = ui.table(rows, headers=("名前", "点"))._repr_html_()
+    assert from_generator == from_list == from_tuple
+    assert "85" in from_generator
+
+
+# --- 外部への通信 -----------------------------------------------------------
+
+
+def test_the_font_is_the_only_thing_fetched_from_outside():
+    """部品が外に取りに行くのは書体だけであること。
+
+    閉じた校内ネットワークで動く前提なので、取得先が増えたら気付けるようにする。
+    """
+    import re as _re
+
+    from library_hiroba._css import BASE_CSS, COMPONENT_CSS
+
+    everything = BASE_CSS + "".join(COMPONENT_CSS.values())
+    urls = _re.findall(r"https?://[^)'\"]+", everything)
+    assert [u for u in urls if "fonts.googleapis.com" not in u] == []
+
+
+def test_use_web_font_false_removes_all_outside_traffic():
+    """児童生徒の閲覧を外部に知らせたくない場合の逃げ道。"""
+    from library_hiroba import ui as _ui
+
+    try:
+        _ui.use_web_font(False)
+        rendered = _ui.card("目標", "本文")._repr_html_()
+        assert "@import" not in rendered
+        assert "googleapis" not in rendered
+        # 見た目の土台は残っている（CSS ごと落としていない）
+        assert ".hui-card" in rendered
+        assert "--hui-accent" in rendered
+    finally:
+        _ui.use_web_font(True)
+
+
+def test_the_font_comes_back_when_turned_on():
+    from library_hiroba import ui as _ui
+
+    _ui.use_web_font(False)
+    _ui.use_web_font(True)
+    assert "fonts.googleapis.com" in _ui.card("a")._repr_html_()

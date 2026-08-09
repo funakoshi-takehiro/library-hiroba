@@ -38,10 +38,31 @@ def _minify(css: str) -> str:
 
 # PyHiroba 本体と同じ書体。読み込めない環境（オフライン・閉域網）では
 # 自動的に system-ui にフォールバックするため、表示は崩れない。
+#
+# これは部品が唯一、外に取りに行くもの。部品を表示するたびに Google へ
+# 通信が発生し、閲覧者の IP が相手に渡る。児童生徒が使う教材でそれを避けたい
+# 場合のために、use_web_font(False) で切れるようにしてある。
 FONT_IMPORT = (
     "@import url('https://fonts.googleapis.com/css2?"
     "family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap');"
 )
+
+_use_web_font = True
+
+
+def use_web_font(enabled: bool) -> None:
+    """書体を Google Fonts から取りに行くかどうかを決める。
+
+    ``False`` にすると、以後に作る部品の CSS から ``@import`` が外れ、
+    **外部への通信が一切なくなる**。書体は端末にあるもの（system-ui）になる。
+    """
+    global _use_web_font
+    _use_web_font = bool(enabled)
+
+
+def base_css() -> str:
+    """いま出力すべき土台の CSS。"""
+    return BASE_CSS if _use_web_font else BASE_CSS_OFFLINE
 
 # トークンは PyHiroba の :root / :root[data-theme="dark"] に対応する。
 # -ink 系はテキスト用に濃度を上げた派生色（ライトのサーフェス #ffffff / #fafaf8 と
@@ -497,4 +518,11 @@ COMPONENT_CSS = {
 }
 
 BASE_CSS = _minify(BASE_CSS)
+# 書体の取得だけを外したもの。@import は必ず先頭にあるので、そこだけ落とす。
+BASE_CSS_OFFLINE = BASE_CSS[len(_minify(FONT_IMPORT)) :].lstrip()
 COMPONENT_CSS = {key: _minify(css) for key, css in COMPONENT_CSS.items()}
+
+if BASE_CSS_OFFLINE.startswith("@import") or "fonts.googleapis.com" in BASE_CSS_OFFLINE:
+    # 切り落とし方が前提とずれた（@import の書き方や _minify を変えた）。
+    # 気付かないまま「通信しない」と言い続けるほうが危ないので、ここで止める。
+    raise RuntimeError("BASE_CSS_OFFLINE から @import を落としきれていません")

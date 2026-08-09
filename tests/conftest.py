@@ -40,4 +40,17 @@ def sample_widgets(text: str = "サンプル") -> dict[str, ui.Widget]:
         "table_dicts": ui.table([{t + "列1": t, t + "列2": 1}, {t + "列1": t, t + "列2": 2}]),
         "table_lists": ui.table([[1, 2], [3, 4]], headers=[t, t + "2"], caption=t),
         "stack": ui.stack(ui.card(t), t + " プレーン文字列"),
+        "chat": ui.chat(
+            [{"role": "user", "content": t}, {"role": "assistant", "content": t + "の答え"}],
+            names={"user": t, "assistant": t + "先生"},
+        ),
+        "chat_widgets": ui.chat([("note", ui.badge(t)), ("assistant", ui.card(t, t))]),
+        "form": ui.form(
+            lambda a, b, c: a,
+            ui.field("a", label=t, placeholder=t, default=t),
+            ui.field("b", label=t, kind="multiline", default=t + "\n2行目"),
+            ui.field("c", label=t, kind="choice", choices=[t + "甲", t + "乙"]),
+            submit_label=t,
+            title=t,
+        ),
     }

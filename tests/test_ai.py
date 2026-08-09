@@ -88,6 +88,7 @@ UI_MAY_IMPORT = {
     "collections",
     "html",
     "inspect",
+    "keyword",
     "re",
     "secrets",
     "typing",
@@ -450,3 +451,39 @@ def test_missing_dependencies_explain_what_to_install(fresh_ai, monkeypatch):
     monkeypatch.setitem(sys.modules, "torch", None)
     with pytest.raises(ImportError, match=r"library-hiroba\[ai\]"):
         run(fresh_ai.load())
+
+
+# --- 本体が壊れた応答を返したとき -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("{not json", "読み取れませんでした"),
+        ("", "読み取れませんでした"),
+        ("[1,2,3]", "形が違います"),
+        ("null", "形が違います"),
+        ('"ok"', "形が違います"),
+        ("123", "形が違います"),
+    ],
+)
+def test_broken_host_replies_give_a_readable_error(fresh_ai, monkeypatch, raw, expected):
+    """利用者に「'list' object has no attribute 'get'」を見せない。
+
+    本体の実装はこれから書かれるので、開発中に必ず通る道になる。
+    """
+    async def broken_host(kind, args_json):
+        return raw
+
+    js = types.ModuleType("js")
+    js.pyhirobaAsk = broken_host
+    monkeypatch.setitem(sys.modules, "js", js)
+
+    with pytest.raises(RuntimeError, match=expected):
+        run(fresh_ai.load())
+
+
+def test_text_that_is_not_a_string_does_not_crash(fresh_ai, in_browser):
+    """本体が数値を返しても止まらない（文字列にして返す）。"""
+    in_browser.replies["ai-ask"] = {"text": 123}
+    assert run(fresh_ai.ask("q")) == "123"

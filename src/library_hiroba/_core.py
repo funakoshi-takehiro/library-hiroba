@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import html as _html
+import re
 import secrets
 from collections.abc import Sequence
 from typing import Union
 
-from ._css import BASE_CSS, COMPONENT_CSS
+from ._css import COMPONENT_CSS, base_css
 
 
 def esc(value: object) -> str:
@@ -18,6 +19,27 @@ def esc(value: object) -> str:
 def esc_attr(value: object) -> str:
     """属性値用エスケープ（改行変換なし）。"""
     return _html.escape(str(value), quote=True)
+
+
+# 長さの指定として許す形。数字と単位だけで、「;」も関数も入れさせない。
+_LENGTH = re.compile(r"^-?(\d+(\.\d+)?|\.\d+)(px|em|rem|%|vh|vw|ch|pt|cm|mm|in|pc)?$")
+
+
+def css_length(value: object, argument: str) -> str:
+    """CSS の長さとして安全な文字列だけを通す。
+
+    ``style="gap: …"`` に文字列をそのまま入れると、エスケープを抜けなくても
+    ``0;position:fixed;…`` のように**別の宣言を継ぎ足せる**。画面を覆う要素を
+    作ったり、``url()`` で外部へ通信させたりできてしまうため、数字と単位以外は
+    受け付けない。
+    """
+    text = str(value).strip()
+    if not _LENGTH.match(text):
+        raise ValueError(
+            f"{argument} には長さを指定してください（例: '12px'、'1.5rem'、'0'）。"
+            f"指定値: {value!r}"
+        )
+    return text
 
 
 def shown(value: object) -> bool:
@@ -66,7 +88,7 @@ class Widget:
     def _style_block(self) -> str:
         needed = set(self._iter_css_keys())
         # COMPONENT_CSS の定義順を保って必要な分だけ連結（重複なし）
-        parts = [BASE_CSS] + [css for key, css in COMPONENT_CSS.items() if key in needed]
+        parts = [base_css()] + [css for key, css in COMPONENT_CSS.items() if key in needed]
         for block in self._iter_extra_css():
             if block not in parts:
                 parts.append(block)
@@ -130,11 +152,11 @@ class Stack(Container):
 
     def __init__(self, items: Sequence[Item], gap: str = "12px"):
         super().__init__(items)
-        self.gap = gap
+        self.gap = css_length(gap, "gap")
 
     def fragment(self) -> str:
         inner = "\n".join(c.fragment() for c in self.children)
-        return f'<div class="hui-stack" style="gap: {esc_attr(self.gap)};">\n{inner}\n</div>'
+        return f'<div class="hui-stack" style="gap: {self.gap};">\n{inner}\n</div>'
 
 
 def show(*items: Item):
