@@ -143,9 +143,14 @@ class Field:
         揃えないと同じコードの計算結果が変わってしまう。
         """
         if self.kind == "number":
-            return float(raw)
-        if self.kind == "choice" and raw not in self.choices:
-            raise ValueError(f"{'／'.join(self.choices)} のどれかを入力してください")
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                raise ValueError("数を入力してください") from None
+        if self.kind == "choice":
+            if str(raw) not in self.choices:
+                raise ValueError(f"{'／'.join(self.choices)} のどれかを入力してください")
+            return str(raw)
         return raw
 
     def ask_via_input(self, attempts: int = 3) -> object:
@@ -285,8 +290,10 @@ class Form(Widget):
             f'<div class="hui-form-title">{esc(self.title)}</div>' if self.title is not None else ""
         )
         rows = "".join(f.fragment() for f in self.fields)
+        # 送信後に入力欄を空にするかどうかは本体側が実行する。印が無いと伝わらない
+        clear = ' data-hui-clear="true"' if self.clear_on_submit else ""
         return (
-            f'<div class="hui-form" data-hui-form="{esc_attr(self.form_id)}">'
+            f'<div class="hui-form" data-hui-form="{esc_attr(self.form_id)}"{clear}>'
             f"{title}{rows}"
             f'<button class="hui-submit" type="button" '
             f'data-hui-submit="{esc_attr(self.form_id)}">{esc(self.submit_label)}</button>'
@@ -371,19 +378,39 @@ class Form(Widget):
         values = {field.name: field.ask_via_input() for field in self.fields}
         display_result(self.handler(**values), pending=self.pending)
 
+    def pending_html(self) -> str:
+        """待っているあいだに出す「考え中」の HTML。出さない設定なら空文字。
+
+        PyHiroba 本体が、押された直後にこれを出力欄へ入れるための口。
+        Colab 側と同じものが出るので、環境で見え方が変わらない。
+        """
+        return "" if self.pending is None else self.pending._repr_html_()
+
     def submit(self, **values: object) -> object:
         """入力値を渡して ``handler`` を呼ぶ。
 
         PyHiroba 本体が値を受け取ったときに呼ぶ入口でもある。
         自分でテストするときにも使える。
 
+        **値は欄の種類に合わせて変換してから渡す。** ブラウザの入力欄から
+        取れるのは常に文字列だが、Colab の ipywidgets は数値欄で float を返す。
+        ここで揃えないと、同じ ``ui.form(...)`` が環境によって違う型を
+        handler に渡してしまう（``age * 2`` が 20.0 ではなく "1010" になる）。
+
         ``handler`` が ``async def`` のときは、返り値が待つもの（awaitable）に
-        なる。呼び出し側で ``await`` してから表示すること。
+        なる。呼び出し側で ``await`` してから表示すること。``yield`` で書かれて
+        いるときは非同期の反復子になるので、回しながら表示を差し替えること。
         """
         missing = [f.name for f in self.fields if f.name not in values]
         if missing:
             raise ValueError(f"入力値が足りません: {missing}")
-        return self.handler(**values)
+        typed = dict(values)
+        for field_ in self.fields:
+            try:
+                typed[field_.name] = field_.convert(values[field_.name])
+            except ValueError as error:
+                raise ValueError(f"{field_.label}: {error}") from None
+        return self.handler(**typed)
 
 
 def field(name, label=None, placeholder="", kind="text", choices=None, default="") -> Field:

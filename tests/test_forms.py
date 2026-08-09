@@ -336,8 +336,10 @@ def test_number_field_asks_again_then_gives_up(monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
     assert ui.field("a", kind="number").ask_via_input() == 3.0
 
+    # 諦めたときも、Python の英語のメッセージ（could not convert string to
+    # float）ではなく、読んで分かる言葉にする
     answers = iter(["a", "b", "c"])
-    with pytest.raises(ValueError, match="could not convert"):
+    with pytest.raises(ValueError, match="数を入力してください"):
         ui.field("a", kind="number").ask_via_input()
 
 
@@ -495,3 +497,66 @@ def test_pending_can_be_a_word_or_turned_off():
     assert ui.form(lambda q: q, ui.field("q"), pending=None).pending is None
     custom = ui.card("待ってね")
     assert ui.form(lambda q: q, ui.field("q"), pending=custom).pending is custom
+
+
+# --- PyHiroba 本体との受け渡し ---------------------------------------------
+
+
+def test_submit_converts_values_like_the_other_paths():
+    """本体は文字列しか送れない。数値欄は float にしてから handler へ渡す。
+
+    揃えないと、同じ ui.form(...) が環境ごとに違う型を渡す。
+    ipywidgets は FloatText なので float、ブラウザの input は常に文字列。
+    """
+    seen = {}
+
+    def handler(age, name, size):
+        seen.update(age=age, name=name, size=size)
+        return ui.card("ok")
+
+    f = ui.form(
+        handler,
+        ui.field("age", kind="number"),
+        ui.field("name"),
+        ui.field("size", kind="choice", choices=["小", "大"]),
+    )
+    f.submit(age="10", name="佐藤", size="大")
+    assert seen["age"] == 10.0 and isinstance(seen["age"], float)
+    assert seen["name"] == "佐藤"
+    assert seen["size"] == "大"
+
+
+def test_submit_accepts_values_that_are_already_typed():
+    """ipywidgets 経路の float をそのまま渡されても壊れないこと。"""
+    seen = {}
+    f = ui.form(lambda age: seen.update(age=age), ui.field("age", kind="number"))
+    f.submit(age=10.0)
+    assert seen["age"] == 10.0
+
+
+def test_submit_says_which_field_was_wrong():
+    f = ui.form(lambda age: age, ui.field("age", label="年れい", kind="number"))
+    with pytest.raises(ValueError, match="年れい: 数を入力してください"):
+        f.submit(age="じゅう")
+
+
+def test_submit_rejects_a_choice_outside_the_list():
+    f = ui.form(lambda size: size, ui.field("size", label="大きさ", kind="choice", choices=["小"]))
+    with pytest.raises(ValueError, match="大きさ:"):
+        f.submit(size="特大")
+
+
+def test_clear_on_submit_is_marked_in_the_html():
+    """本体が入力欄を空にするかどうかを、HTML から判断できること。"""
+    assert 'data-hui-clear="true"' in ui.form(
+        lambda q: q, ui.field("q"), clear_on_submit=True
+    ).fragment()
+    assert "data-hui-clear" not in ui.form(lambda q: q, ui.field("q")).fragment()
+
+
+def test_pending_html_is_available_to_the_host():
+    """本体が押した直後に出す「考え中」を、Colab と同じ見た目で取り出せること。"""
+    f = ui.form(lambda q: q, ui.field("q"))
+    assert "hui-thinking" in f.pending_html()
+    assert f.pending_html().startswith('<div class="hui">')
+    assert ui.form(lambda q: q, ui.field("q"), pending=None).pending_html() == ""
