@@ -20,10 +20,18 @@ def fake_ipywidgets(monkeypatch):
     """ipywidgets の代役を入れ、その module を返す。"""
 
     class FakeWidget:
-        def __init__(self, **kwargs):
-            self.value = kwargs.get("value", "")
+        # 本物の HTML(...) は値を位置引数でも受け取る。Output は outputs を持ち、
+        # add_class で CSS クラスが付く。どれも実装側が使うので代役にも持たせる
+        def __init__(self, value="", **kwargs):
+            self.value = kwargs.get("value", value)
             self.kwargs = kwargs
             self.fn = None
+            self.outputs = ()
+            self.classes = []
+
+        def add_class(self, name):
+            self.classes.append(name)
+            return self
 
         def on_click(self, fn):
             self.fn = fn
@@ -37,9 +45,46 @@ def fake_ipywidgets(monkeypatch):
     fake = types.ModuleType("ipywidgets")
     for name in ("Text", "Textarea", "FloatText", "Dropdown", "Button", "Output", "HTML"):
         setattr(fake, name, FakeWidget)
-    fake.VBox = lambda children: {"vbox": list(children)}
+
+    class FakeBox(dict):
+        def __init__(self, children):
+            super().__init__(vbox=list(children))
+            self.classes = []
+
+        def add_class(self, name):
+            self.classes.append(name)
+            return self
+
+    fake.VBox = FakeBox
     monkeypatch.setitem(sys.modules, "ipywidgets", fake)
     return fake
+
+
+def widgets_of(fake_ipython):
+    """表示された VBox から、入力欄・送信ボタン・出力欄を役割で取り出す。
+
+    位置で取ると、<style> や見出しを足したときに崩れる。
+    """
+    children = fake_ipython.displayed[0]["vbox"]
+    button = next(c for c in children if getattr(c, "fn", None) is not None)
+    # description はどの種類の入力欄にも付く。<style>・見出し・出力欄には無い
+    control = next(
+        c
+        for c in children
+        if c is not button and hasattr(c, "kwargs") and "description" in c.kwargs
+    )
+    return control, button
+
+
+def output_html(fake_ipython):
+    """出力欄（VBox の最後）に、いま入っている HTML。空なら ""。"""
+    output = fake_ipython.displayed[0]["vbox"][-1]
+    if not output.outputs:
+        return ""
+    return "".join(
+        entry.get("data", {}).get("text/html", "") + entry.get("text", "")
+        for entry in output.outputs
+    )
 
 
 def make_form(**kwargs):
@@ -186,10 +231,10 @@ def test_uses_ipywidgets_when_available(fake_ipython, monkeypatch):
     fake_ipywidgets(monkeypatch)
     make_form()._ipython_display_()
     assert fake_ipython.displayed and "vbox" in fake_ipython.displayed[0]
-    # ボタンが押されたときに handler が呼ばれ、結果が表示されること
-    button = fake_ipython.displayed[0]["vbox"][1]
+    # ボタンが押されたときに handler が呼ばれ、結果が出力欄に入ること
+    _text_box, button = widgets_of(fake_ipython)
     button.fn(None)
-    assert any(isinstance(x, ui.Widget) for x in fake_ipython.displayed)
+    assert "hui-card" in output_html(fake_ipython)
 
 
 def test_repr_html_is_used_when_ipython_is_absent():
@@ -234,8 +279,7 @@ def test_registry_does_not_grow_without_bound():
 def test_clear_on_submit_empties_text_fields(fake_ipython, monkeypatch):
     fake_ipywidgets(monkeypatch)
     ui.form(lambda question: ui.card(question), "question", clear_on_submit=True)._ipython_display_()
-    children = fake_ipython.displayed[0]["vbox"]
-    text_box, button = children[0], children[1]
+    text_box, button = widgets_of(fake_ipython)
 
     text_box.value = "スマホは？"
     button.fn(None)
@@ -245,8 +289,7 @@ def test_clear_on_submit_empties_text_fields(fake_ipython, monkeypatch):
 def test_values_are_kept_when_clear_on_submit_is_off(fake_ipython, monkeypatch):
     fake_ipywidgets(monkeypatch)
     ui.form(lambda question: ui.card(question), "question")._ipython_display_()
-    children = fake_ipython.displayed[0]["vbox"]
-    text_box, button = children[0], children[1]
+    text_box, button = widgets_of(fake_ipython)
 
     text_box.value = "そのまま残る"
     button.fn(None)
@@ -278,12 +321,10 @@ def test_async_handler_is_awaited_on_the_input_path(fake_ipython, monkeypatch):
 def test_async_handler_is_awaited_on_the_ipywidgets_path(fake_ipython, monkeypatch):
     fake_ipywidgets(monkeypatch)
     make_async_form()._ipython_display_()
-    children = fake_ipython.displayed[0]["vbox"]
-    text_box, button = children[0], children[1]
+    text_box, button = widgets_of(fake_ipython)
     text_box.value = "2の8乗は？"
     button.fn(None)
-    widgets_shown = [x for x in fake_ipython.displayed if isinstance(x, ui.Widget)]
-    assert widgets_shown and "2の8乗は？" in widgets_shown[-1]._repr_html_()
+    assert "2の8乗は？" in output_html(fake_ipython)
 
 
 def test_async_handler_is_scheduled_when_a_loop_is_running(fake_ipython):
@@ -465,6 +506,75 @@ def test_a_synchronous_answer_skips_the_pending_step():
     shown = _drive(ui.card("すぐ出る"), pending=ui.thinking())
     assert len(shown) == 1
     assert "すぐ出る" in shown[0]._repr_html_()
+
+
+def test_streaming_reaches_the_output_when_a_loop_is_running(fake_ipython, monkeypatch):
+    """Colab と同じ条件で送信する。ここが動かないと「押しても何も出ない」（F1）。
+
+    Colab はループが回っている状態でボタンの押下を配るので、表示は後から別の
+    タスクで走る。``with output:`` の捕捉はセルの実行文脈に紐づくため、その
+    経路では届かない。実際に文字が出力欄へ入るところまで見る。
+    """
+    fake_ipywidgets(monkeypatch)
+
+    async def handler(question):
+        for chunk in ["こ", "んにちは"]:
+            await asyncio.sleep(0)
+            yield ui.card(question, chunk)
+
+    async def colab():
+        ui.form(handler, ui.field("question", label=""))._ipython_display_()
+        text_box, button = widgets_of(fake_ipython)
+        text_box.value = "やあ"
+        button.fn(None)
+        await asyncio.sleep(0.05)  # ループに順番をゆずる
+        return output_html(fake_ipython)
+
+    html = asyncio.run(colab())
+    assert "やあ" in html and "んにちは" in html
+
+
+def test_a_failing_handler_says_so_instead_of_going_quiet(fake_ipython, monkeypatch):
+    """handler が落ちたとき、黙って何も出ないのがいちばん困る（F1）。"""
+    fake_ipywidgets(monkeypatch)
+
+    async def handler(question):
+        raise RuntimeError("わざと落とす")
+        yield  # 非同期ジェネレータにするため（ここへは来ない）
+
+    async def colab():
+        ui.form(handler, ui.field("question", label=""))._ipython_display_()
+        _text_box, button = widgets_of(fake_ipython)
+        button.fn(None)
+        await asyncio.sleep(0.05)
+        return output_html(fake_ipython)
+
+    assert "わざと落とす" in asyncio.run(colab())
+
+
+def test_bad_input_is_reported_on_the_widgets_path(fake_ipython, monkeypatch):
+    """数の欄に文字が入っていても、押した人に理由が見えること（F1）。"""
+    fake_ipywidgets(monkeypatch)
+    ui.form(lambda age: ui.card(age), ui.field("age", kind="number"))._ipython_display_()
+    number_box, button = widgets_of(fake_ipython)
+    number_box.value = "数ではない"  # 本物は float だが、検証ツールで壊されうる
+    button.fn(None)
+    assert "数を入力してください" in output_html(fake_ipython)
+
+
+def test_the_widgets_path_carries_the_library_styling(fake_ipython, monkeypatch):
+    """ipywidgets 経路にも CSS を届ける。素の見た目のまま出さない（F2）。"""
+    fake_ipywidgets(monkeypatch)
+    make_form()._ipython_display_()
+    box = fake_ipython.displayed[0]
+    text_box, button = widgets_of(fake_ipython)
+    assert box.classes == ["hui-wform"]
+    assert "hui-wfield" in text_box.classes
+    assert "hui-wsubmit" in button.classes
+    # 部品側の <style> が出ない経路なので、フォーム自身が CSS を持って出る
+    style = box["vbox"][0].value
+    assert style.startswith("<style>")
+    assert ".hui-wsubmit" in style and "--hui-accent" in style
 
 
 def test_a_generator_handler_replaces_the_display_each_time():
