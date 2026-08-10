@@ -568,13 +568,17 @@ def test_the_widgets_path_carries_the_library_styling(fake_ipython, monkeypatch)
     make_form()._ipython_display_()
     box = fake_ipython.displayed[0]
     text_box, button = widgets_of(fake_ipython)
-    assert box.classes == ["hui-wform"]
+    # base_css は配色や角丸を .hui に載せている。付け忘れると var(--hui-accent) が
+    # 解決できず、色も枠も無い素の ipywidgets に戻る
+    assert box.classes == ["hui", "hui-wform"]
     assert "hui-wfield" in text_box.classes
     assert "hui-wsubmit" in button.classes
     # 部品側の <style> が出ない経路なので、フォーム自身が CSS を持って出る
     style = box["vbox"][0].value
     assert style.startswith("<style>")
     assert ".hui-wsubmit" in style and "--hui-accent" in style
+    # 変数を配っているセレクタが箱に付いていること（ここがずれると全部無色になる）
+    assert ".hui{" in style.replace(" ", "")
 
 
 def test_a_generator_handler_replaces_the_display_each_time():
@@ -694,3 +698,20 @@ def test_pending_html_is_available_to_the_host():
     assert "hui-thinking" in f.pending_html()
     assert f.pending_html().startswith('<div class="hui">')
     assert ui.form(lambda q: q, ui.field("q"), pending=None).pending_html() == ""
+
+
+def test_a_failure_while_displaying_is_not_swallowed(fake_ipython, monkeypatch):
+    """押下処理から出た例外は戻る先が無く、Colab では跡形もなく消える（F1）。
+
+    submit() だけでなく display_result() まで囲っていないと、
+    「押しても何も起きない」だけが残る。
+    """
+    fake_ipywidgets(monkeypatch)
+    monkeypatch.setattr(
+        "library_hiroba._forms.display_result",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("表示のときに落ちた")),
+    )
+    make_form()._ipython_display_()
+    _text_box, button = widgets_of(fake_ipython)
+    button.fn(None)  # 例外が外へ抜けないこと
+    assert "表示のときに落ちた" in output_html(fake_ipython)

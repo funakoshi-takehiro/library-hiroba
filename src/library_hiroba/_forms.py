@@ -407,18 +407,20 @@ class Form(Widget):
             if self.clear_on_submit:
                 for name in clearable:
                     controls[name].value = ""
+            # display_result まで含めて囲む。ipywidgets の押下処理から出た例外は
+            # 呼び出し元に戻る先が無く、Colab では画面にもログにも出ないまま消える
+            # （押しても何も起きない、という形だけが残る）
             try:
                 # handler を直に呼ばず submit() を通す。欄の種類に合わせた変換が
                 # ここにあり、飛ばすと Colab だけ handler に違う型が渡る
                 result = self.submit(**values)
+                display_result(result, into=output, pending=self.pending)
             except Exception:  # noqa: BLE001 — 入力の誤りも、出さないと直せない
                 import traceback
 
                 output.outputs = (
                     {"output_type": "stream", "name": "stderr", "text": traceback.format_exc()},
                 )
-                return
-            display_result(result, into=output, pending=self.pending)
 
         button.on_click(on_click)
         # ipywidgets の部品には .hui-... の CSS が付いてこないので、ここで一度だけ出す
@@ -426,6 +428,9 @@ class Form(Widget):
         style = widgets.HTML(self._widget_style_block())
         header = [widgets.HTML(f"<b>{esc(self.title)}</b>")] if self.title is not None else []
         box = widgets.VBox([style, *header, *controls.values(), button, output])
+        # 配色・角丸・書体は base_css が .hui に載せている。ここを付け忘れると
+        # var(--hui-accent) がどこにも無い変数になり、色も枠も無い素の見た目に戻る
+        _add_class(box, "hui")
         _add_class(box, "hui-wform")
         display(box)
         return True
