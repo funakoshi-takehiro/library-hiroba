@@ -562,9 +562,9 @@ class Talk:
         :meth:`stream` の引数名と揃っている必要がある。ここが両方を持つので、
         使う側で名前を合わせなくてよい。
 
-        **PyHiroba ではまだ動きません**（画面の入力を Python に戻す道が本体側に
-        無いため）。そちらでは注意書きを添えて出す。両方の環境で使う教材は
-        ``await talk.ask(...)`` の形で書いてください。
+        フォームに対応していない古い PyHiroba で開いた場合だけ、注意書きを
+        添えて出す。対応済みの本体（``pyhirobaFeatures`` に ``forms`` がある）
+        と Colab では、そのまま出す。
         """
         from . import ui
 
@@ -575,13 +575,16 @@ class Talk:
             clear_on_submit=True,
             **kwargs,
         )
-        if not in_browser():
+        if not in_browser() or host_supports("forms"):
             return built
-        # 押しても何も起きないフォームだけを出すと、書いた人は自分の誤りを疑う
+        # 押しても何も起きないフォームだけを出すと、書いた人は自分の誤りを疑う。
+        # 判定に in_browser() を使ってはいけない（PyHiroba なら常に真なので、
+        # フォームが動く本体にも警告を出してしまう）
         return ui.stack(
             ui.alert(
-                "この入力欄は、いまのところ Google Colab でだけ動きます。"
-                "PyHiroba で動かすときは await talk.ask(...) の形で書いてください。",
+                "この入力欄は、いまお使いの PyHiroba では動きません。"
+                "本体が新しくなると動くようになります。"
+                "それまでは await talk.ask(...) の形で書いてください。",
                 kind="warning",
             ),
             built,
@@ -661,6 +664,33 @@ def in_browser() -> bool:
     except ImportError:
         return False
     return hasattr(js, "pyhirobaAsk")
+
+
+def host_features() -> set[str]:
+    """本体が「対応している」と名乗っている機能の名前。
+
+    本体が ``self.pyhirobaFeatures = 'forms,ai,ai-probe'`` の形で出す文字列を
+    読む。無い版では空になる。
+
+    ``in_browser()`` では代わりにならない。あれは ``pyhirobaAsk`` があるかしか
+    答えず、**AI が動くことと、フォームが動くことは別**だから。実際、フォームが
+    使えるようになった本体でも ``in_browser()`` は真のままで、library-hiroba は
+    「PyHiroba では動きません」と出し続けていた。
+
+    名前は「,」区切りの完全一致で見る。部分一致にすると ``ai-probe`` しか
+    無いときに ``ai`` が真になってしまう。
+    """
+    try:
+        import js
+    except ImportError:
+        return set()
+    listed = getattr(js, "pyhirobaFeatures", "") or ""
+    return {name.strip() for name in str(listed).split(",") if name.strip()}
+
+
+def host_supports(feature: str) -> bool:
+    """本体がその機能に対応していると名乗っているか。"""
+    return feature in host_features()
 
 
 # ---------------------------------------------------------------------------
@@ -866,6 +896,12 @@ class Ai:
 
         if self._name is None:
             await self.load()
+        # 本体が対応機能を名乗っているなら、それに従う（毎回失敗すると分かって
+        # いる往復を省ける）。何も名乗らない古い本体には、今までどおり聞いてみる
+        named = host_features()
+        if named and "ai-stream" not in named:
+            yield await self._ask_in_browser(prompt, max_tokens)
+            return
         try:
             started = await self._call_host(
                 "ai-ask-start", json.dumps({"prompt": str(prompt), "max_tokens": max_tokens})

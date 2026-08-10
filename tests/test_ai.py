@@ -658,6 +658,33 @@ def test_stream_falls_back_when_the_host_cannot_do_it(fresh_ai, in_browser):
     assert "ai-ask" in [kind for kind, _ in in_browser.calls]
 
 
+def test_stream_skips_the_doomed_call_when_the_host_lists_its_features(fresh_ai, in_browser):
+    """本体が機能を名乗るなら、失敗すると分かっている往復は省く（T2）。"""
+    import js
+
+    js.pyhirobaFeatures = "forms,ai,ai-probe"  # ai-stream が無い
+    in_browser.replies["ai-ask"] = {"text": "全文です"}
+
+    async def gather():
+        return [c async for c in fresh_ai.stream("q")]
+
+    assert run(gather()) == ["全文です"]
+    kinds = [kind for kind, _ in in_browser.calls]
+    assert "ai-ask-start" not in kinds, "名乗っていない機能を呼びに行かないこと"
+    assert "ai-ask" in kinds
+
+
+def test_stream_still_probes_a_host_that_names_nothing(fresh_ai, in_browser):
+    """機能を名乗らない古い本体には、今までどおり聞いてみる（T2）。"""
+    in_browser.replies["ai-ask"] = {"text": "全文です"}
+
+    async def gather():
+        return [c async for c in fresh_ai.stream("q")]
+
+    run(gather())
+    assert "ai-ask-start" in [kind for kind, _ in in_browser.calls]
+
+
 def test_stream_uses_the_host_when_it_can(fresh_ai, monkeypatch):
     """ai-ask-start が id を返したら、ai-ask-next を繰り返す。"""
     parts = [
@@ -1187,14 +1214,48 @@ def test_talk_form_matches_its_own_field_name():
     ]
 
 
-def test_talk_form_warns_where_it_cannot_work(monkeypatch):
-    """PyHiroba ではフォームが動かない。黙って死んだ入力欄を出さない（T1）。"""
+def test_talk_form_warns_only_where_it_really_cannot_work(monkeypatch):
+    """注意書きは、フォームが動かない本体にだけ出す（T1）。
+
+    in_browser() で判定すると PyHiroba では常に真になり、**フォームが動く本体
+    にも警告が出る**。実際にそうなり、本体側が同梱を見送る事態になった。
+    見るのは本体が名乗る機能一覧のほう。
+    """
     talk, _ = make_talk()
-    assert "hui-alert" not in talk.form()._repr_html_()  # Colab ではそのまま
+    # Colab。js が無いので、そもそも注意書きは要らない
+    assert "hui-alert" not in talk.form()._repr_html_()
+
+    # フォームに対応していない古い PyHiroba
     monkeypatch.setattr(_ai, "in_browser", lambda: True)
+    monkeypatch.setattr(_ai, "host_features", set)
     shown = talk.form()._repr_html_()
     assert "hui-alert-warning" in shown
-    assert "Colab" in shown and "talk.ask" in shown
+    assert "talk.ask" in shown
+
+    # 対応済みの PyHiroba。ここに注意書きを出してはいけない
+    monkeypatch.setattr(_ai, "host_features", lambda: {"forms", "ai", "ai-probe"})
+    assert "hui-alert" not in talk.form()._repr_html_()
+
+
+def test_host_features_are_matched_whole(monkeypatch):
+    """「,」区切りの完全一致で見る。部分一致だと ai-probe が ai を名乗る（T1）。"""
+    js = types.ModuleType("js")
+    js.pyhirobaFeatures = "forms, ai-probe"
+    monkeypatch.setitem(sys.modules, "js", js)
+    assert _ai.host_features() == {"forms", "ai-probe"}
+    assert _ai.host_supports("forms")
+    assert _ai.host_supports("ai-probe")
+    assert not _ai.host_supports("ai")        # ai-probe の一部を拾わない
+    assert not _ai.host_supports("form")      # forms の一部を拾わない
+
+
+def test_host_features_is_empty_without_a_host(monkeypatch):
+    """名乗らない古い本体と、js の無い Colab では空（T1）。"""
+    js = types.ModuleType("js")  # pyhirobaFeatures を持たない古い本体
+    monkeypatch.setitem(sys.modules, "js", js)
+    assert _ai.host_features() == set()
+    monkeypatch.setitem(sys.modules, "js", None)  # import すると ImportError
+    assert _ai.host_features() == set()
 
 
 def test_talk_validates_its_settings():
