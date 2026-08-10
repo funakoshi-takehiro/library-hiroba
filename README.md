@@ -66,6 +66,7 @@ CSS が届く範囲はそのコンポーネントの内側に限られるため�
 | 自由 HTML/CSS | `ui.html('<div class="x">…</div>', css=".x { color: hotpink; }")` |
 | 入力フォーム | `ui.form(handler, ui.field("question", label="質問"))` |
 | 考え中の表示 | `ui.thinking("考え中")`（`ui.form()` が送信中に自動で出します） |
+| 会話をためる | `ui.conversation()` に `say()`（自分）・`reply()`（相手）・`note()`（補足）で足す |
 | 会話の表示 | `ui.chat([{"role": "user", "content": "…"}, {"role": "assistant", "content": "…"}])` |
 
 複数のコンポーネントは次のようにまとめます。
@@ -123,25 +124,34 @@ ui.form(ask,
 
 ### チャット形式にする
 
-`ui.chat()` は会話を吹き出しで並べます。役割は `user` / `assistant` / `note` の3つで、`content` には文字列のほか他のコンポーネントも入れられます。
-
-会話を変数にためて `ui.chat()` を返すようにすると、1つのセルでチャットができます。`clear_on_submit=True` を付けると、送信のたびに入力欄が空になります。
+`ui.conversation()` は会話をためておく入れ物です。`say()` が自分の発言（右）、`reply()` が相手の発言（左）、`note()` が発言ではない補足（真ん中）になります。`content` には文字列のほか他のコンポーネントも入れられます。
 
 ```python
-history = []
+talk = ui.conversation(names={"assistant": "ボット"})
+talk.say("こんにちは")
+talk.reply("やあ！")
+talk                      # セル最後の式に置くと吹き出しで表示される
+```
+
+`ui.form()` と組み合わせると、1つのセルでチャットができます。`clear_on_submit=True` を付けると、送信のたびに入力欄が空になります。
+
+```python
+talk = ui.conversation(names={"assistant": "ボット"})
 
 def ask(question):
-    history.append({"role": "user", "content": question})
-    history.append({"role": "assistant", "content": f"「{question}」ですね。"})
-    return ui.chat(history, names={"user": "あなた", "assistant": "ボット"})
+    talk.say(question)
+    talk.reply(f"「{question}」ですね。")
+    return talk
 
 ui.form(ask, ui.field("question", label="質問"),
         submit_label="送信", clear_on_submit=True)
 ```
 
+`ui.chat()` もあります。こちらは**渡した会話をその場で表示するだけ**で、ためる機能はありません。すでに手元にある会話のリストを表示したいときに使います。`talk.messages` はそのまま `ui.chat()` に渡せる形です。
+
 ## AI（LLM）
 
-`ai` は、LLM をその場で動かします。メソッドは4つです。
+`ai` は、LLM をその場で動かします。
 
 ```python
 from library_hiroba import ai
@@ -200,58 +210,50 @@ await ai.load("auto")     # おすすめをそのまま読み込む
 
 `await ai.load()` は今までどおり、環境によらず `qwen05` を読みます。教材を配ったあとで動くモデルが変わらないよう、自動で選ぶのは `"auto"` と書いたときだけです。
 
-### チャットとして表示する
+### AI とチャットする
 
-`ui.form()`・`ui.chat()` と組み合わせると、1つのセルで対話ができます。
-
-```python
-history = []
-
-async def ask(question):
-    history.append({"role": "user", "content": question})
-    history.append({"role": "assistant", "content": await ai.ask(question)})
-    return ui.chat(history, names={"user": "あなた", "assistant": "AI"})
-
-await ai.load()
-ui.form(ask, ui.field("question", label="質問"),
-        submit_label="送信", clear_on_submit=True)
-```
-
-`handler` は `async def` で書けます。`ui.form()` は返り値が `await` の要るものかどうかを見て、必要なら待ってから表示します。送信のたびに会話全体を描き直すので、吹き出しが下に伸びていきます。入力欄は `clear_on_submit=True` で空に戻ります。
-
-> **2点、気をつけてください。**
->
-> - この例では `history` を**表示にしか使っていません**。`ai.ask()` が受け取るのは1回分の文章だけなので、**AI は前のやりとりを覚えていません**。「その高さは？」のように前を受けた質問には答えられません。覚えさせるには、これまでのやりとりを質問に添えて渡します。
-> - **`ui.form()` は PyHiroba ではまだ動きません**（表示はされますが、押しても何も起きません）。画面の入力を Python に戻す道が本体側に無いためです（[`docs/PYHIROBA_FORMS.md`](docs/PYHIROBA_FORMS.md)）。**両方の環境で使う教材は、フォームを使わずコードから話しかける形にしてください。**
->
-> どちらへの対処も [`notebooks/chat.ipynb`](notebooks/chat.ipynb) にまとめてあります。
-
-送信を押すと、答えが返るまで「考え中」の点が動きます。言葉を変えるときは `pending="AI が考えています"`、出さないときは `pending=None` を渡してください。
-
-はじめに `await ai.load()` を済ませておくと、1通目でモデルの読み込み（数十秒〜）を待たされずに済みます。
-
-### 書けたところから少しずつ出す
-
-`ai.stream()` は、答えを書けたぶんから返します。`handler` を `yield` で書くと、届くたびに表示が差し替わります。
+`ai.talk()` は AI との会話をひとつ作ります。**前のやりとりを覚えている**ので、前を受けた聞き方が通じます。
 
 ```python
-history = []
+talk = ai.talk()
 
-async def talk(question):
-    history.append({"role": "user", "content": question})
-    text = ""
-    async for chunk in ai.stream(question):
-        text += chunk
-        yield ui.chat(history + [{"role": "assistant", "content": text}],
-                      names={"user": "あなた", "assistant": "AI"})
-    history.append({"role": "assistant", "content": text})
-
-await ai.load()
-ui.form(talk, ui.field("question", label="質問"),
-        submit_label="送信", clear_on_submit=True)
+await talk.ask("日本で一番高い山は？")
+await talk.ask("その高さは？")      # 「その」が山を指すと分かる
 ```
 
-`ai.stream()` を全部つなげると `ai.ask()` と同じ文になります。少しずつ返せない環境では、書き終えてから一度にまとめて返すため、どちらでも同じコードが動きます。考えている途中（`<think>`）は、途中で切れても取り除かれます。
+`await ai.load()` は要りません。最初の `ask()` のときに読み込まれます。`ask()` は会話ぜんぶを返すので、セル最後の式に置くと吹き出しで表示されます。
+
+`ai.ask()` が受け取るのは1回分の文章だけで、前に何を話したかは覚えていません。`ai.talk()` は、その差を埋める後始末を引き受けています。
+
+1. 直前のやりとりを、質問に添えて渡す（記憶）
+2. 答えたあとにモデルが自分で書き足した会話の続きを、切り落とす
+3. 少しずつ届く答えを、そのつど吹き出しに組み直す
+
+| 変えられるもの | |
+|---|---|
+| `keep` | 覚えておく往復の数（既定 4）。話がかみ合わなくなったら減らす |
+| `max_tokens` | 1回の答えの長さ（既定 96） |
+| `names` | 表示名。`{"user": "生徒", "assistant": "先生"}` |
+| `instruction` | 会話の先頭に添える指示 |
+
+`talk.clear()` でやり直し、`talk.messages` で会話の取り出しができます。
+
+**この書き方は Colab でも PyHiroba でも動きます。**
+
+### 入力欄から話しかける
+
+`talk.form()` は、入力欄・送信ボタン・吹き出しをまとめて出します。答えは書けたところから少しずつ足されていきます。
+
+```python
+chat = ai.talk()
+chat.form()
+```
+
+`placeholder` と `submit_label` は変えられます。押すと答えが返るまで「考え中」の点が動き、`pending="AI が考えています"` で言葉を、`pending=None` で非表示にできます。
+
+> **`ui.form()` は PyHiroba ではまだ動きません。** 表示はされますが、押しても何も起きません。画面の入力を Python に戻す道が本体側に無いためです（[`docs/PYHIROBA_FORMS.md`](docs/PYHIROBA_FORMS.md)）。PyHiroba で開いたときは `talk.form()` がその旨の注意書きを添えて出します。**両方の環境で使う教材は、上の `await talk.ask(...)` の形で書いてください。**
+
+組み立てを自分で書きたい場合は、`ai.stream()` を `yield` で回す形も使えます。`ai.stream()` を全部つなげると `ai.ask()` と同じ文になります。少しずつ返せない環境では、書き終えてから一度にまとめて返すため、どちらでも同じコードが動きます。考えている途中（`<think>`）は、途中で切れても取り除かれます。
 
 モデルのライセンスは配布元をご確認ください（既定の Qwen2.5 は Apache-2.0）。
 

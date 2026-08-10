@@ -445,6 +445,149 @@ def _unfinished_tag_length(text: str) -> int:
     return 0
 
 
+class Talk:
+    """AI との会話。前のやりとりを覚えていて、続きが通じる。
+
+        talk = ai.talk()
+        await talk.ask("日本で一番高い山は？")
+        await talk.ask("その高さは？")      # 「その」が山を指すと分かる
+
+    ``ask()`` と ``stream()`` は :class:`Conversation` を返すので、セル最後の
+    式に置けば吹き出しで表示される。
+
+    :meth:`Ai.ask` が受け取るのは1回分の文章だけで、前に何を話したかは覚えて
+    いない。ここが引き受けているのは、その差を埋める3つの後始末:
+
+    1. 直前 ``keep`` 往復ぶんを添えて渡す（記憶）
+    2. 答えたあとにモデルが自分で書き足した会話の続きを切り落とす
+    3. 少しずつ届く答えを、そのつど吹き出しに組み直す
+    """
+
+    #: 添える指示。何も言わないと、小さなモデルは延々と書き続けがち
+    DEFAULT_INSTRUCTION = "これまでの会話です。AI として、最後の質問に日本語で短く答えてください。"
+
+    #: モデルが勝手に会話を続けたときの切れ目
+    CONTINUATIONS = ("あなた:", "あなた：", "\nAI:")
+
+    def __init__(
+        self,
+        ai: Ai,
+        keep: int = 4,
+        max_tokens: int = 96,
+        names: dict | None = None,
+        instruction: str | None = None,
+    ) -> None:
+        if keep < 1:
+            raise ValueError(f"keep は1以上にしてください（指定値: {keep!r}）")
+        check_max_tokens(max_tokens)
+        from . import ui
+
+        self._ai = ai
+        self.keep = keep
+        self.max_tokens = max_tokens
+        self.instruction = self.DEFAULT_INSTRUCTION if instruction is None else instruction
+        self.conversation = ui.conversation(names=names)
+
+    def __repr__(self) -> str:
+        return f"<library_hiroba.Talk 発言 {len(self.conversation)} 件>"
+
+    def _repr_html_(self) -> str:
+        return self.conversation._repr_html_()
+
+    def clear(self) -> Talk:
+        """会話をやり直す。"""
+        self.conversation.clear()
+        return self
+
+    @property
+    def messages(self) -> list[dict]:
+        """いままでの会話。``ui.chat()`` にそのまま渡せる。"""
+        return self.conversation.messages
+
+    def _prompt(self, message: object) -> str:
+        """直前のやりとりを添えた、モデルに渡す文章を作る。"""
+        recent = self.messages[-self.keep * 2 :]
+        lines = [self.instruction, ""]
+        for said in recent:
+            who = "あなた" if said["role"] == "user" else "AI"
+            lines.append(f"{who}: {said['content']}")
+        lines.append(f"あなた: {message}")
+        lines.append("AI:")
+        return "\n".join(lines)
+
+    def _clean(self, text: str) -> str:
+        """モデルが書き足した会話の続きを切り落とす。"""
+        for marker in self.CONTINUATIONS:
+            if marker in text:
+                text = text.split(marker)[0]
+        return text.strip()
+
+    async def ask(self, message: object):
+        """1往復して、会話ぜんぶを返す。"""
+        prompt = self._prompt(message)
+        self.conversation.say(message)
+        answer = await self._ai.ask(prompt, max_tokens=self.max_tokens)
+        self.conversation.reply(self._clean(answer))
+        return self.conversation
+
+    async def stream(self, message: object):
+        """同じことを、書けたところから少しずつ返す。
+
+        書きかけは会話に入れず、**その回だけの写しに載せて**返す。入れてしまうと
+        次の質問に渡す記憶が、書きかけの文で埋まる。
+        """
+        from . import ui
+
+        prompt = self._prompt(message)
+        self.conversation.say(message)
+        text = ""
+        async for chunk in self._ai.stream(prompt, max_tokens=self.max_tokens):
+            text += chunk
+            partial = self._clean(text)
+            if partial:
+                yield ui.conversation(
+                    [*self.messages, {"role": "assistant", "content": partial}],
+                    names=self.conversation.names,
+                )
+        self.conversation.reply(self._clean(text))
+        yield self.conversation
+
+    def form(self, placeholder: str = "メッセージを入力", submit_label: str = "送信", **kwargs):
+        """入力欄・送信ボタン・吹き出しをまとめて出す。
+
+        >>> chat = ai.talk()
+        >>> chat.form()
+
+        ``ui.form()`` は入力欄の name をそのままキーワード引数にするため、
+        :meth:`stream` の引数名と揃っている必要がある。ここが両方を持つので、
+        使う側で名前を合わせなくてよい。
+
+        **PyHiroba ではまだ動きません**（画面の入力を Python に戻す道が本体側に
+        無いため）。そちらでは注意書きを添えて出す。両方の環境で使う教材は
+        ``await talk.ask(...)`` の形で書いてください。
+        """
+        from . import ui
+
+        built = ui.form(
+            self.stream,
+            ui.field("message", label="", placeholder=placeholder),
+            submit_label=submit_label,
+            clear_on_submit=True,
+            **kwargs,
+        )
+        if not in_browser():
+            return built
+        # 押しても何も起きないフォームだけを出すと、書いた人は自分の誤りを疑う
+        return ui.stack(
+            ui.alert(
+                "この入力欄は、いまのところ Google Colab でだけ動きます。"
+                "PyHiroba で動かすときは await talk.ask(...) の形で書いてください。",
+                kind="warning",
+            ),
+            built,
+        )
+
+
 class ThinkingFilter:
     """少しずつ届く文字から、考えている途中を取り除いて渡す。
 
@@ -561,6 +704,33 @@ class Ai:
         found = await self.environment()
         name, reason = choose(found)
         return Recommendation(name, reason, found)
+
+    def talk(
+        self,
+        keep: int = 4,
+        max_tokens: int = 96,
+        names: dict | None = None,
+        instruction: str | None = None,
+    ) -> Talk:
+        """会話を始める。前のやりとりを覚えているので、続きが通じる。
+
+        >>> talk = ai.talk()
+        >>> await talk.ask("日本で一番高い山は？")
+        >>> await talk.ask("その高さは？")
+
+        ``ui.chat()`` が「渡した会話を表示する」のに対し、こちらは「会話をする」。
+        ``await`` が要るのは :meth:`Talk.ask` のほうで、ここには要らない。
+        モデルは最初の :meth:`Talk.ask` で自動的に読み込まれる。
+
+        - ``keep``: 覚えておく往復の数。小さなモデルは長い文章が苦手なので、
+          話がかみ合わなくなってきたら減らす
+        - ``max_tokens``: 1回の答えの長さ
+        - ``names``: 表示名（``{"user": "生徒", "assistant": "先生"}``）
+        - ``instruction``: 会話の先頭に添える指示
+        """
+        return Talk(
+            self, keep=keep, max_tokens=max_tokens, names=names, instruction=instruction
+        )
 
     async def load(self, model: str | None = None) -> str:
         """モデルを読み込む。初回だけ時間と通信量がかかる。

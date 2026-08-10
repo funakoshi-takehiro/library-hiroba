@@ -159,6 +159,12 @@ optimum-cli export onnx --model llm-jp/llm-jp-3-440m-instruct3 --task text-gener
 
 `llm-jp-3` で ONNX 版が公開されているのは **150M の instruct2 だけ**です。440M・980M・1.8B・3.7B・13B と、instruct3 系にはいずれも変換版がありません。そのため、**上の変換を自分で行わない限り、LLM-jp を 150M より増やすことはできません**。
 
+### `ai.talk()` について（本体側の対応は不要です）
+
+0.5.0 で足した `ai.talk()` は、会話の記憶・モデルが書き足した続きの切り落とし・逐次表示の組み立てを library-hiroba 側で行うだけの入れ物です。**本体に求めるものは増えません。** 内部で呼ぶのは今までと同じ `ai-ask`（と、あれば `ai-ask-start` / `ai-ask-next`）で、記憶は「これまでの会話」を1つの文章に組み直して `ai-ask` の `prompt` に載せる形で渡します。本体から見ると、少し長い prompt が来るだけです。
+
+`talk.form()` は `ui.form()` をそのまま使うため、[`PYHIROBA_FORMS.md`](PYHIROBA_FORMS.md) の対応が入るまで PyHiroba では動きません。そちらで開いたときは、押しても何も起きないフォームだけを出さないよう、`in_browser()` が真のときに注意書きを添えて出しています。
+
 ### `ai-models` を呼ばない理由
 
 `await ai.models()` は、本体に聞かずに library-hiroba 側の表から作ります。本体の一覧をそのまま返すと、**同じコードなのに環境によって選べる名前が変わって**しまうためです。返す形は両方の経路で同じ `[{"name", "label", "approxMB"}, …]` で、`approxMB` だけがその環境の実際の値になります。

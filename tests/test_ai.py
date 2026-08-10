@@ -1078,3 +1078,137 @@ def test_the_recommendation_only_lists_what_was_measured():
     assert "空き容量" not in labels
     assert "GPU のメモリ" not in labels
     assert "読み込む名前" in labels
+
+
+# --- ai.talk（記憶つきの会話） ----------------------------------------------
+
+
+class FakeModel:
+    """Ai の代役。ask / stream だけを持ち、渡された prompt を控える。"""
+
+    def __init__(self, replies=None):
+        self.replies = list(replies or ["富士山です。"])
+        self.prompts = []
+
+    def _next(self, prompt):
+        self.prompts.append(prompt)
+        return self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
+
+    async def ask(self, prompt, max_tokens=None):
+        return self._next(prompt)
+
+    async def stream(self, prompt, max_tokens=None):
+        for chunk in self._next(prompt):
+            yield chunk
+
+
+def make_talk(replies=None, **kwargs):
+    model = FakeModel(replies)
+    return _ai.Talk(model, **kwargs), model
+
+
+def test_talk_carries_the_earlier_turns_into_the_next_prompt():
+    """ai.ask() は1回分しか受け取らない。ここが埋めているのが記憶（T1）。"""
+    talk, model = make_talk(["富士山です。", "3776メートルです。"])
+    run(talk.ask("日本で一番高い山は？"))
+    run(talk.ask("その高さは？"))
+    second = model.prompts[1]
+    assert "日本で一番高い山は？" in second
+    assert "富士山です。" in second
+    assert second.rstrip().endswith("AI:")  # 続きを書かせる形で終える
+
+
+def test_talk_forgets_beyond_keep():
+    """小さなモデルは長い文章が苦手。覚えておく往復を絞れること（T1）。"""
+    talk, model = make_talk(["1つめ", "2つめ", "3つめ"], keep=1)
+    run(talk.ask("A"))
+    run(talk.ask("B"))
+    run(talk.ask("C"))
+    third = model.prompts[2]
+    assert "B" in third and "2つめ" in third
+    assert "1つめ" not in third  # 1往復ぶんより古いものは渡さない
+
+
+def test_talk_cuts_off_what_the_model_wrote_for_us():
+    """答えたあとに自分で会話を続けるモデルがある（T1）。"""
+    talk, _ = make_talk(["富士山です。\nあなた: ありがとう\nAI: どういたしまして"])
+    run(talk.ask("山は？"))
+    assert talk.messages[-1] == {"role": "assistant", "content": "富士山です。"}
+
+
+def test_talk_streams_a_growing_view_then_settles():
+    """届いたぶんから見せ、最後に会話へ確定させる（T1）。"""
+    talk, _ = make_talk(["こんにちは"])
+
+    async def collect():
+        return [view.messages async for view in talk.stream("やあ")]
+
+    views = run(collect())
+    assert len(views) == len("こんにちは") + 1  # 1文字ごと + 確定
+    assert views[0][-1]["content"] == "こ"
+    assert views[-1] == talk.messages
+    # 書きかけは会話に残さない。残すと次の記憶が書きかけで埋まる
+    assert talk.messages == [
+        {"role": "user", "content": "やあ"},
+        {"role": "assistant", "content": "こんにちは"},
+    ]
+
+
+def test_talk_renders_and_survives_the_sanitizer():
+    talk, _ = make_talk()
+    run(talk.ask("<script>alert(1)</script>"))
+    html = talk._repr_html_()
+    assert check_html(html) == []
+    assert "<script" not in html.lower()
+
+
+def test_talk_form_matches_its_own_field_name():
+    """ui.form は欄の name をキーワード引数にする。ずれるとフォームだけ壊れる（T1）。
+
+    利用者が名前を合わせなくてよいのが form() の値打ちなので、
+    実際に submit() を通して確かめる。
+    """
+    talk, _ = make_talk(["どうも"])
+    form = talk.form()
+    assert [f.name for f in form.fields] == ["message"]
+
+    async def collect():
+        return [view async for view in form.submit(message="やあ")]
+
+    run(collect())
+    assert talk.messages == [
+        {"role": "user", "content": "やあ"},
+        {"role": "assistant", "content": "どうも"},
+    ]
+
+
+def test_talk_form_warns_where_it_cannot_work(monkeypatch):
+    """PyHiroba ではフォームが動かない。黙って死んだ入力欄を出さない（T1）。"""
+    talk, _ = make_talk()
+    assert "hui-alert" not in talk.form()._repr_html_()  # Colab ではそのまま
+    monkeypatch.setattr(_ai, "in_browser", lambda: True)
+    shown = talk.form()._repr_html_()
+    assert "hui-alert-warning" in shown
+    assert "Colab" in shown and "talk.ask" in shown
+
+
+def test_talk_validates_its_settings():
+    with pytest.raises(ValueError, match="keep"):
+        _ai.Talk(FakeModel(), keep=0)
+    with pytest.raises(ValueError, match="max_tokens"):
+        _ai.Talk(FakeModel(), max_tokens=0)
+
+
+def test_talk_can_start_over():
+    talk, _ = make_talk()
+    run(talk.ask("やあ"))
+    assert talk.clear().messages == []
+
+
+def test_ai_talk_hands_back_a_talk_that_uses_it(fresh_ai):
+    """ai.talk() が返すものが、その ai を使うこと（別のモデルを見に行かない）。"""
+    talk = fresh_ai.talk(keep=2, names={"assistant": "先生"})
+    assert isinstance(talk, _ai.Talk)
+    assert talk._ai is fresh_ai
+    assert talk.keep == 2
+    assert talk.conversation.names == {"assistant": "先生"}

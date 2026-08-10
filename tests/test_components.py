@@ -4,6 +4,7 @@ import re
 
 import pytest
 from conftest import has_rule
+from sanitize_check import check_html
 
 import library_hiroba
 from library_hiroba import ui
@@ -358,6 +359,79 @@ def test_scoped_css_must_stay_inside_its_scope():
     ui.html("x", css="/* } */ .a { color: red }")
     # 意図してページ全体に効かせる場合は scoped=False
     assert ui.html("x", css="} body {}", scoped=False)
+
+
+def test_conversation_stacks_up_in_the_right_roles():
+    """say / reply / note が、それぞれの向きの吹き出しになる（C1）。"""
+    talk = ui.conversation(names={"assistant": "ボット"})
+    talk.say("こんにちは")
+    talk.reply("やあ！")
+    talk.note("ここから練習です")
+    html = talk._repr_html_()
+    for role in ("user", "assistant", "note"):
+        assert html.count(f"hui-msg hui-msg-{role}") == 1
+    assert "ボット" in html
+    assert check_html(html) == []
+
+
+def test_conversation_can_be_shown_while_still_empty():
+    """最初のセルで作って、次のセルから足していく書き方を通す（C1）。
+
+    ui.chat() は空を受け付けないので、ここが分かれ目になる。
+    """
+    talk = ui.conversation()
+    assert len(talk) == 0
+    html = talk._repr_html_()
+    assert '<div class="hui-chat"></div>' in html
+    assert check_html(html) == []
+    with pytest.raises(ValueError, match="1つ以上"):
+        ui.chat([])  # こちらは今までどおり受け付けない
+
+
+def test_conversation_messages_can_be_handed_to_chat():
+    """ためた会話は ui.chat() にそのまま渡せる形であること（C1）。"""
+    talk = ui.conversation()
+    talk.say("やあ").reply("どうも")  # つなげても書ける
+    assert talk.messages == [
+        {"role": "user", "content": "やあ"},
+        {"role": "assistant", "content": "どうも"},
+    ]
+    assert "やあ" in ui.chat(talk.messages)._repr_html_()
+
+
+def test_conversation_messages_is_a_copy():
+    """写しを返す。直接 append しても増えないほうが、間違いに気付ける（C1）。"""
+    talk = ui.conversation()
+    talk.say("やあ")
+    talk.messages.append({"role": "user", "content": "増えないはず"})
+    talk.messages[0]["content"] = "書き換わらないはず"
+    assert talk.messages == [{"role": "user", "content": "やあ"}]
+
+
+def test_conversation_rejects_an_unknown_role_when_it_is_added():
+    """表示のときまで持ち越さず、足した時点で止める（C1）。"""
+    with pytest.raises(ValueError, match="role は"):
+        ui.conversation([{"role": "せんせい", "content": "やあ"}])
+    talk = ui.conversation()
+    with pytest.raises(ValueError, match="role は"):
+        talk._add("system", "やあ")
+
+
+def test_conversation_carries_the_css_of_what_is_inside_it():
+    """吹き出しに部品を入れたとき、その CSS も一緒に出ること（C1）。"""
+    talk = ui.conversation()
+    talk.reply(ui.card("答え", "本文"))
+    html = talk._repr_html_()
+    assert "hui-card" in html
+    assert has_rule(html, ".hui-card")
+    assert check_html(html) == []
+
+
+def test_conversation_clears():
+    talk = ui.conversation()
+    talk.say("やあ").reply("どうも")
+    assert len(talk.clear()) == 0
+    assert talk.messages == []
 
 
 def test_html_rejects_what_pyhiroba_would_strip():

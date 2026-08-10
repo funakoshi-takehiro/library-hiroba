@@ -490,6 +490,8 @@ COMPONENT_CSS = {
 .hui-form-out:not(:empty) { margin-top: 12px; }""",
     "chat": """\
 .hui-chat { display: flex; flex-direction: column; gap: 10px; margin: 10px 0; }
+/* ui.conversation() は空から始まる。何も無いあいだは場所を取らない */
+.hui-chat:empty { margin: 0; }
 .hui-msg { display: flex; flex-direction: column; max-width: 82%; }
 .hui-msg-name { font-size: 0.8em; color: var(--hui-ink-3); margin-bottom: 2px; }
 .hui-msg-body {
