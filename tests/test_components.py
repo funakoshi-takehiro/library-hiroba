@@ -360,6 +360,79 @@ def test_scoped_css_must_stay_inside_its_scope():
     assert ui.html("x", css="} body {}", scoped=False)
 
 
+def test_html_rejects_what_pyhiroba_would_strip():
+    """PyHiroba 側で消えるものは、書いた時点で止める（S2）。
+
+    止めないと Colab では動いて本番では動かず、書いた本人は気付けない。
+    """
+    for raw in [
+        "<script>alert(1)</script>",
+        '<iframe src="http://example.com"></iframe>',
+        '<form action="http://example.com"><input></form>',
+        '<object data="x.swf"></object>',
+        '<embed src="x"/>',
+        '<link rel="stylesheet" href="http://example.com/x.css">',
+        '<div onclick="steal()">押して</div>',
+        '<a href="javascript:alert(1)">ここ</a>',
+    ]:
+        with pytest.raises(ValueError, match="PyHiroba では表示できない"):
+            ui.html(raw)
+
+
+def test_html_rejection_survives_case_and_entities():
+    """大文字や実体参照で隠しても素通りしない（S2）。"""
+    with pytest.raises(ValueError, match="PyHiroba では表示できない"):
+        ui.html("<SCRIPT>alert(1)</SCRIPT>")
+    with pytest.raises(ValueError, match="PyHiroba では表示できない"):
+        ui.html('<div ONCLICK="x()">a</div>')
+    # &#106; は j。HTMLParser が属性値を復元してから渡すので拾える。
+    # 正規表現で書き直すとここが落ちる
+    with pytest.raises(ValueError, match="PyHiroba では表示できない"):
+        ui.html('<a href="&#106;avascript:alert(1)">a</a>')
+    # 途中に空白を挟んでも URL としては通ってしまう
+    with pytest.raises(ValueError, match="PyHiroba では表示できない"):
+        ui.html('<a href="java\nscript:alert(1)">a</a>')
+
+
+def test_html_says_what_it_found():
+    """何が引っかかったのか分からないと直せない（S2）。"""
+    with pytest.raises(ValueError) as caught:
+        ui.html('<div onclick="x()"><script>y</script></div>')
+    message = str(caught.value)
+    assert "<script> タグ" in message
+    assert "onclick 属性" in message
+    # 直し方の手がかりも添える
+    assert "IPython.display.HTML" in message
+
+
+def test_html_stays_a_usable_escape_hatch():
+    """逃げ道として使えなくなるほど厳しくしない（S2）。
+
+    id も style も、どちらの環境でも残るので触らない。
+    """
+    ui.html('<div id="x" style="color: red; transform: rotate(3deg)">やあ</div>')
+    ui.html('<a href="https://example.com" target="_blank">リンク</a>')
+    ui.html('<img src="data:image/gif;base64,R0lGOD" alt="">')
+    ui.html("<div><span>閉じ忘れ")  # 断片の中で閉じるのでホストには漏れない
+    # css 側の検査とは別軸。scoped を外しても raw は見る
+    with pytest.raises(ValueError, match="PyHiroba では表示できない"):
+        ui.html("<script>x</script>", css="p { margin: 0 }", scoped=False)
+
+
+def test_dangerous_tag_list_matches_the_sanitize_checker():
+    """一覧が2か所にあるので、ずれたら気付けるようにする（S2）。
+
+    片方から import すると、検査の正しさをテスト自身が保証できなくなる。
+    独立に書いたうえで、一致することをここで確かめる。
+    """
+    import sanitize_check
+
+    from library_hiroba._components import DANGEROUS_TAGS, URL_ATTRS
+
+    assert DANGEROUS_TAGS == sanitize_check.FORBIDDEN_TAGS
+    assert URL_ATTRS == sanitize_check.URL_ATTRS
+
+
 def test_alert_kind_is_conveyed_to_screen_readers():
     """記号は aria-hidden なので、種類は言葉でも伝える（W2）。"""
     for kind, spoken in [("info", "お知らせ"), ("success", "できました"),
