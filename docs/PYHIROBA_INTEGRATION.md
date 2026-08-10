@@ -113,12 +113,14 @@ return JSON.stringify({
 | `qwen05`（既定） | `qwen05-q8` | `onnx-community/Qwen2.5-0.5B-Instruct` | `Qwen/Qwen2.5-0.5B-Instruct` |
 | `qwen05-q4` | `qwen05-q4` | 同上（q4 の重み） | `Qwen/Qwen2.5-0.5B-Instruct` |
 | `qwen15` | `qwen15-q4` | `onnx-community/Qwen2.5-1.5B-Instruct` | `Qwen/Qwen2.5-1.5B-Instruct` |
-| `qwen3_06` | `qwen3_06-q4` | `onnx-community/Qwen3-0.6B-ONNX` | `Qwen/Qwen3-0.6B` |
-| `qwen3_06-q8` | `qwen3_06-q8` | 同上（q8 の重み） | `Qwen/Qwen3-0.6B` |
+| `qwen3_06` | `qwen3_06-q8` | `onnx-community/Qwen3-0.6B-ONNX` | `Qwen/Qwen3-0.6B` |
+| `qwen3_06-q4` | `qwen3_06-q4` | 同上（q4 の重み） | `Qwen/Qwen3-0.6B` |
 | `qwen3_17` | `qwen3_17-q4` | `onnx-community/Qwen3-1.7B-ONNX` | `Qwen/Qwen3-1.7B` |
 | `llmjp150m` | `llmjp150m-q4` | `onnx-community/llm-jp-3-150m-instruct2-ONNX` | `llm-jp/llm-jp-3-150m-instruct2` |
 
 精度まで指定されたときは、その指定をそのまま尊重して渡します。一覧に無い名前は本体に届く前に `ValueError` にします。
+
+> **`qwen3_06` だけ推奨が q8 です**（0.4.0 で q4 から変更）。このモデルは 4bit のほうが**大きく**（q4 877MB / q8 589MB）、精度も 8bit のほうが上だからです。逆に見えますが、`onnx-community` の q4 は MatMul の重みだけを 4bit にし、埋め込み（`Gather` 演算）を fp32 のまま残すためです。Qwen3 0.6B は語彙が 151936 と大きく、埋め込みだけで全体の 26%（156M パラメータ＝fp32 で 622MB）を占めるので、そこが残ると 4bit にした分を打ち消して上回ります。「4bit なら軽いはず」で戻さないよう、テストで固定してあります（`tests/test_ai.py::test_the_recommended_precision_is_not_the_biggest_download`）。他のモデルは埋め込みの比率が小さいか q8 が用意されていないため、q4 のままです。
 
 **右の2列は同じモデルの別形式でなければいけません。** 本体が別の変換元を選ぶと、利用者は同じ名前を書いたのに環境ごとに違うモデルが動きます。取り違えを防ぐため、両方を `_ai.py` の `MODELS`（`browser_repo` と `colab_id`）に書き、名前が一致することをテストで確かめています（`tests/test_ai.py::test_both_paths_load_the_same_model`）。
 

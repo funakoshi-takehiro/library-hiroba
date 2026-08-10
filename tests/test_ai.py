@@ -190,6 +190,37 @@ def test_every_model_says_what_it_needs(name):
     assert set(spec["needs"]["colab"]) == {"ram_gb", "vram_gb"}
 
 
+@pytest.mark.parametrize("name", sorted(_ai.MODELS))
+def test_the_recommended_precision_is_one_we_offer(name):
+    """``browser_key`` は必ず ``browser_variants`` の中から選ぶこと。
+
+    ここがずれると本体の知らない名前が渡り、ブラウザでだけ読み込みに失敗する
+    （Colab には精度の区別が無いので、手元のテストでは気付けない）。
+    先頭を推奨の精度にしておく。
+    """
+    spec = _ai.MODELS[name]
+    assert spec["browser_key"] in spec["browser_variants"]
+    assert spec["browser_variants"][0] == spec["browser_key"], (
+        f"{name}: 推奨の精度を browser_variants の先頭に置くこと"
+    )
+
+
+@pytest.mark.parametrize("name", sorted(_ai.MODELS))
+def test_the_recommended_precision_is_not_the_biggest_download(name):
+    """推奨の精度が、選べる中でいちばん重いものになっていないこと。
+
+    ``qwen3_06`` では 4bit のほうが大きい（877MB）。q4 は MatMul だけを 4bit に
+    し、埋め込みは fp32 で残すためで、語彙 151936 の Qwen3 ではそこが効く。
+    「4bit なら軽いはず」で q4 に戻すと、利用者の通信量が 1.5 倍になる。
+    """
+    spec = _ai.MODELS[name]
+    if spec["browser_key"].endswith("-q4") and f"{name}-q8" in spec["browser_variants"]:
+        pytest.fail(
+            f"{name}: q8 も選べるのに q4 を推奨している。"
+            "このモデルでは 8bit のほうが小さく精度も高いか、確かめること"
+        )
+
+
 def test_the_quality_order_has_no_ties():
     """順位が重なると「いちばん良いもの」が呼ぶたびに変わりかねない。"""
     ranks = [spec["rank"] for spec in _ai.MODELS.values()]

@@ -88,16 +88,21 @@ MODELS = {
         "label": "Qwen3 0.6B（Qwen2.5 0.5B より新しい・日本語が少し良い）",
         "colab_id": "Qwen/Qwen3-0.6B",
         "browser_repo": "onnx-community/Qwen3-0.6B-ONNX",
-        "browser_key": "qwen3_06-q4",
-        "browser_variants": ("qwen3_06-q4", "qwen3_06-q8"),
-        "approx_mb": {"browser": 550, "colab": 1500},
+        # 既定は q4 ではなく q8。このモデルでは 8bit のほうが**小さく、しかも精度が
+        # 高い**（PyHiroba 側の実測で q4 877MB / q8 589MB）。逆に見えるが、q4 は
+        # MatMul の重みだけを 4bit にし、埋め込み（Gather）は fp32 のまま残すため。
+        # Qwen3 0.6B は語彙が 151936 と大きく、埋め込みだけで全体の 26%（156M）を
+        # 占めるので、そこが fp32 で残ると 4bit にした分を打ち消して上回る。
+        "browser_key": "qwen3_06-q8",
+        "browser_variants": ("qwen3_06-q8", "qwen3_06-q4"),
+        "approx_mb": {"browser": 589, "colab": 1500},
         "has_thinking": True,
         "rank": 3,
         # 一覧の中でいちばん小さいのに、答えは 150M よりずっとまともになる。
         # メモリの少ない端末を救えるのはここなので、条件をいちばん緩くしてある
         # （qwen05 より下。navigator.deviceMemory の 2 は低スペック機の区分）
         "needs": {
-            "browser": {"webgpu": True, "memory_gb": 2, "storage_mb": 800},
+            "browser": {"webgpu": True, "memory_gb": 2, "storage_mb": 900},
             "colab": {"ram_gb": 4, "vram_gb": None},
         },
     },
