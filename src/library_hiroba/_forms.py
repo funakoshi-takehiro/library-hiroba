@@ -41,6 +41,40 @@ _REGISTRY_LIMIT = 64
 # 表示待ちの処理。回収されないよう、終わるまでここで持つ（display_result 参照）
 _PENDING: set = set()
 
+# 別スレッドで走らせている処理。テストから終わりを待てるようにしておく
+_WORKERS: set = set()
+
+
+def run_detached(coro) -> None:
+    """コルーチンを、自前のループを持つ別スレッドで最後まで走らせる。
+
+    ノートブックのループに載せる（``ensure_future``）やり方は Colab で動かない。
+    セルの実行が終わっているあいだ本体がループを回しておらず、予約したタスクが
+    順番待ちのまま止まるためで、``asyncio.get_running_loop()`` は
+    ``running=True`` と答えるので気付きにくい。
+    """
+    import threading
+
+    async def guarded() -> None:
+        # ここで受け止めないと、スレッドの中で消える（show_each 側でも受けているが、
+        # 念のため。表に出ないまま終わるのがいちばん困る）
+        try:
+            await coro
+        except Exception:  # noqa: BLE001
+            import traceback
+
+            traceback.print_exc()
+
+    def target() -> None:
+        try:
+            asyncio.run(guarded())
+        finally:
+            _WORKERS.discard(threading.current_thread())
+
+    worker = threading.Thread(target=target, daemon=True, name="hui-form")
+    _WORKERS.add(worker)
+    worker.start()
+
 # pending を書かなかったときの印。None は「出さない」の指定に使うため、
 # 「指定なし」と区別できる別の値が要る。
 _DEFAULT_PENDING = object()
@@ -271,14 +305,31 @@ def display_result(result: object, into: object = None, pending: object = None) 
 
     try:
         asyncio.get_running_loop()
+        running = True
     except RuntimeError:
+        running = False
+
+    if not running:
         # ノートブックの外（素の Python）。回っているループが無いので自分で回す
         asyncio.run(show_each())
+    elif into is not None:
+        # ボタンの押下から呼ばれている（ipywidgets 経路）。
+        #
+        # ここで ensure_future を使ってはいけない。Colab はセルの実行が終わって
+        # いるあいだループを回しておらず、予約したタスクは順番待ちのまま止まる。
+        # ループ自体は running=True と答えるので気付きにくい（tools/
+        # check_form_colab.py で実測: 押下処理は走り、Output への書き込みも届く
+        # のに、予約したタスクだけが走らない）。「押しても何も起きない」の正体。
+        #
+        # 自前のループを別スレッドで回せば、本体がループを回しているかに関係なく
+        # 最後まで走る。表示は Output の outputs へ入れるだけで、別スレッドから
+        # でも届く（display() と違い、セルの実行文脈に紐づかないため）。
+        run_detached(show_each())
     else:
-        # ノートブックの中。ループに載せて、届いたものから順に表示する。
+        # ループが回っていて、出す先が Output ではない場合。display() は実行中の
+        # セルに紐づくので、別スレッドへ逃がさずこのループに載せる。
         # 参照を持たないと、待っている最中に回収されて結果が出ないことがある
-        # （ループはタスクを弱参照でしか持たない）。AI の返事は数秒かかるので、
-        # 終わるまで手元で持っておき、終わったら捨てる。
+        # （ループはタスクを弱参照でしか持たない）。
         task = asyncio.ensure_future(show_each())
         _PENDING.add(task)
         task.add_done_callback(_PENDING.discard)

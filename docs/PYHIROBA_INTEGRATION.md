@@ -39,6 +39,7 @@ PyHiroba 本体は library-hiroba を同梱（vendoring）して配ります。�
   - 以前は CSS の先頭に Google Fonts の `@import` を入れていましたが、外しました。PyHiroba では本体が持っているぶん不要で、実際に効くのは Colab（隔離 iframe でページの書体が届かない）だけです。そちらは PyHiroba と揃っている必要がない一方、表示のたびに Google へ通信が起き閲覧者の IP が渡るため、既定では行いません。Colab で揃えたい利用者は `ui.use_web_font(True)` を呼べます
   - 取得先が増えていないことはテストで固定してあります（`tests/test_components.py::test_nothing_is_fetched_by_default`）
 - **サニタイザに落とされるものは、ライブラリ側でも受け付けません**。部品の出力にそれらが含まれないことは以前から `tests/sanitize_check.py` で固定していますが、0.4.0 からは唯一エスケープしない経路である `ui.html()` も、`<script>` などのタグ・`on*` 属性・`javascript:` URL を見つけた時点で `ValueError` にします。本体のサニタイザが無い Colab で書いて、PyHiroba に載せて初めて消えているのに気付く、という順序を避けるためです。禁止タグの一覧は本体側と揃える必要があるので、変えるときは連絡してください（`src/library_hiroba/_components.py` の `DANGEROUS_TAGS`）
+- **`ui` が使う標準ライブラリに `threading` が入りました**（0.5.1）。使うのは Colab・Jupyter の ipywidgets 経路だけです。Colab はセルの実行が終わっているあいだイベントループを回しておらず、ボタンの押下から予約したタスクが走らないため、自前のループを別スレッドで回しています。**PyHiroba には IPython も ipywidgets も無いのでこの経路に入らず、Pyodide 上でスレッドを作ることはありません。** `import threading` 自体も関数の中まで遅らせてあります
 - **`ai` は使われるまで読み込みません**。`from library_hiroba import ui` だけなら `_ai.py` は読み込まれません
 - `_ai.py` はブラウザでは `js` しか使いません。`transformers` / `torch` を読み込むのは Colab 経路に入ったときだけです
 

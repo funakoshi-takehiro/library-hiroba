@@ -93,6 +93,11 @@ UI_MAY_IMPORT = {
     "keyword",
     "re",
     "secrets",
+    # ipywidgets 経路だけで使う（Colab のループは押下処理から予約したタスクを
+    # 走らせないため、自前のループを別スレッドで回す）。PyHiroba には IPython も
+    # ipywidgets も無いのでその経路に入らず、Pyodide でスレッドは作らない。
+    # 読み込み自体も関数の中まで遅らせてある
+    "threading",
     "traceback",
     "typing",
     # ノートブックのある環境でだけ使う。無ければ使わない作りになっている

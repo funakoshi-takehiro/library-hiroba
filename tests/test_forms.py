@@ -508,12 +508,25 @@ def test_a_synchronous_answer_skips_the_pending_step():
     assert "すぐ出る" in shown[0]._repr_html_()
 
 
-def test_streaming_reaches_the_output_when_a_loop_is_running(fake_ipython, monkeypatch):
+def settle(timeout=5.0):
+    """送信のために立ち上がったスレッドが終わるのを待つ。"""
+    import time
+
+    from library_hiroba import _forms
+
+    limit = time.monotonic() + timeout
+    while _forms._WORKERS and time.monotonic() < limit:
+        time.sleep(0.01)
+    assert not _forms._WORKERS, "送信の処理が終わらない"
+
+
+def test_streaming_reaches_the_output_without_the_loop_being_pumped(fake_ipython, monkeypatch):
     """Colab と同じ条件で送信する。ここが動かないと「押しても何も出ない」（F1）。
 
-    Colab はループが回っている状態でボタンの押下を配るので、表示は後から別の
-    タスクで走る。``with output:`` の捕捉はセルの実行文脈に紐づくため、その
-    経路では届かない。実際に文字が出力欄へ入るところまで見る。
+    Colab はループが回っている状態で押下を配るが、セルの実行が終わっている
+    あいだそのループを回していない。予約したタスクは順番待ちのまま止まる。
+    そこで**押したあとループに一切順番を渡さず**、それでも結果が届くかを見る。
+    ensure_future に戻すと、ここが落ちる。
     """
     fake_ipywidgets(monkeypatch)
 
@@ -527,10 +540,11 @@ def test_streaming_reaches_the_output_when_a_loop_is_running(fake_ipython, monke
         text_box, button = widgets_of(fake_ipython)
         text_box.value = "やあ"
         button.fn(None)
-        await asyncio.sleep(0.05)  # ループに順番をゆずる
-        return output_html(fake_ipython)
+        # ここで await しない。Colab のループが止まっているのと同じ状態にする
 
-    html = asyncio.run(colab())
+    asyncio.run(colab())  # ループごと終了する
+    settle()
+    html = output_html(fake_ipython)
     assert "やあ" in html and "んにちは" in html
 
 
@@ -546,10 +560,10 @@ def test_a_failing_handler_says_so_instead_of_going_quiet(fake_ipython, monkeypa
         ui.form(handler, ui.field("question", label=""))._ipython_display_()
         _text_box, button = widgets_of(fake_ipython)
         button.fn(None)
-        await asyncio.sleep(0.05)
-        return output_html(fake_ipython)
 
-    assert "わざと落とす" in asyncio.run(colab())
+    asyncio.run(colab())
+    settle()
+    assert "わざと落とす" in output_html(fake_ipython)
 
 
 def test_bad_input_is_reported_on_the_widgets_path(fake_ipython, monkeypatch):
