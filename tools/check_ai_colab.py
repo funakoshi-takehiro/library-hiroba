@@ -71,12 +71,54 @@ async def check(model: str, prompt: str, max_tokens: int) -> int:
     return 0
 
 
+async def check_chat(model: str, message: str) -> int:
+    """ai.talk().stream() を、フォームを介さず直接回して経過を出す。
+
+    「送信しても考え中のまま」のとき、止まっているのが読み込みなのか生成なのか
+    を切り分けるためのもの。ウィジェットを使わないので、表示のしくみとは
+    切り離して確かめられる。
+    """
+    if in_browser():
+        print("ここはブラウザ（PyHiroba）です。この確認は Colab 経路が対象です。")
+        return 1
+
+    print(f"読み込み済み: {ai.is_loaded()}")
+    started = time.time()
+    if model != "auto":
+        print(await ai.load(model))
+        print(f"  読み込み: {time.time() - started:.1f} 秒\n")
+
+    talk = ai.talk()
+    started = time.time()
+    views = 0
+    async for view in talk.stream(message):
+        views += 1
+        last = view.messages[-1]["content"]
+        shown = last if isinstance(last, str) else "（考え中の表示）"
+        print(f"  {time.time() - started:6.1f} 秒  {views:3d} 回目  {shown[:60]!r}")
+    print(f"\n会話: {talk.messages}")
+
+    answer = talk.messages[-1]["content"]
+    if answer == talk.NO_ANSWER:
+        print("\n失敗: 一文字も返りませんでした")
+        return 1
+    print(f"\nOK: {views} 回の更新で答えが出ました")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default="llmjp150m", choices=[*MODELS, "auto"])
     parser.add_argument("--prompt", default="日本の四季について、2行で書いて")
     parser.add_argument("--max-tokens", type=int, default=48)
+    parser.add_argument(
+        "--chat",
+        action="store_true",
+        help="ai.talk().stream() を直接回して、どこで止まるかを経過つきで見る",
+    )
     args = parser.parse_args()
+    if args.chat:
+        return asyncio.run(check_chat(args.model, args.prompt))
     return asyncio.run(check(args.model, args.prompt, args.max_tokens))
 
 

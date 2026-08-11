@@ -1118,9 +1118,13 @@ def test_the_recommendation_only_lists_what_was_measured():
 class FakeModel:
     """Ai の代役。ask / stream だけを持ち、渡された prompt を控える。"""
 
-    def __init__(self, replies=None):
+    def __init__(self, replies=None, loaded=True):
         self.replies = list(replies or ["富士山です。"])
         self.prompts = []
+        self.loaded = loaded
+
+    def is_loaded(self):
+        return self.loaded
 
     def _next(self, prompt):
         self.prompts.append(prompt)
@@ -1134,8 +1138,8 @@ class FakeModel:
             yield chunk
 
 
-def make_talk(replies=None, **kwargs):
-    model = FakeModel(replies)
+def make_talk(replies=None, loaded=True, **kwargs):
+    model = FakeModel(replies, loaded=loaded)
     return _ai.Talk(model, **kwargs), model
 
 
@@ -1176,8 +1180,10 @@ def test_talk_streams_a_growing_view_then_settles():
         return [view.messages async for view in talk.stream("やあ")]
 
     views = run(collect())
-    assert len(views) == len("こんにちは") + 1  # 1文字ごと + 確定
-    assert views[0][-1]["content"] == "こ"
+    assert len(views) == len("こんにちは") + 2  # 先に自分の発言 + 1文字ごと + 確定
+    # 1つめは、まだ答えが来ていなくても自分の発言が見えていること
+    assert views[0][0] == {"role": "user", "content": "やあ"}
+    assert views[1][-1]["content"] == "こ"
     assert views[-1] == talk.messages
     # 書きかけは会話に残さない。残すと次の記憶が書きかけで埋まる
     assert talk.messages == [
@@ -1278,3 +1284,65 @@ def test_ai_talk_hands_back_a_talk_that_uses_it(fresh_ai):
     assert talk._ai is fresh_ai
     assert talk.keep == 2
     assert talk.conversation.names == {"assistant": "先生"}
+
+
+def test_talk_shows_what_you_typed_before_the_answer_arrives():
+    """チャットなのだから、自分の発言は答えを待たずに見えること（T3）。
+
+    ここを待ってから出すと、画面には「考え中」しか無い時間が続き、
+    送れたのかどうかも分からない。
+    """
+    talk, _ = make_talk(["こんにちは"])
+
+    async def first():
+        async for view in talk.stream("やあ"):
+            return view
+
+    view = run(first())
+    shown = view._repr_html_()
+    assert "やあ" in shown                      # 打った内容が出ている
+    assert "hui-msg hui-msg-user" in shown
+    assert "hui-thinking" in shown              # AI の側は考え中の点
+    assert check_html(shown) == []
+
+
+def test_talk_says_when_it_is_still_loading_the_model():
+    """読み込みと生成を言い分ける。初回は数分かかる（T3）。"""
+    loading, _ = make_talk(["答え"], loaded=False)
+
+    async def first(talk):
+        async for view in talk.stream("やあ"):
+            return view
+
+    assert "モデルを読み込んでいます" in run(first(loading))._repr_html_()
+    ready, _ = make_talk(["答え"], loaded=True)
+    assert "モデルを読み込んでいます" not in run(first(ready))._repr_html_()
+
+
+def test_talk_says_so_when_nothing_came_back():
+    """空の吹き出しは故障に見える。返らなかったことを言葉にする（T3）。"""
+    talk, _ = make_talk([""])
+
+    async def drain():
+        return [v async for v in talk.stream("やあ")]
+
+    run(drain())
+    assert talk.messages[-1]["content"] == _ai.Talk.NO_ANSWER
+
+    asked, _ = make_talk([""])
+    run(asked.ask("やあ"))
+    assert asked.messages[-1]["content"] == _ai.Talk.NO_ANSWER
+
+
+def test_is_loaded_reports_the_right_thing_per_environment(fresh_ai, monkeypatch):
+    """待ち方を変える判断材料。経路ごとに見る場所が違う（T3）。"""
+    assert not fresh_ai.is_loaded()
+    fresh_ai._pipe = object()
+    assert fresh_ai.is_loaded()
+
+    monkeypatch.setattr(_ai, "in_browser", lambda: True)
+    fresh_ai._pipe = object()      # ブラウザでは _pipe を使わない
+    fresh_ai._name = None
+    assert not fresh_ai.is_loaded()
+    fresh_ai._name = "qwen05-q8"
+    assert fresh_ai.is_loaded()

@@ -469,6 +469,9 @@ class Talk:
     #: モデルが勝手に会話を続けたときの切れ目
     CONTINUATIONS = ("あなた:", "あなた：", "\nAI:")
 
+    #: 一文字も返らなかったときに出す言葉。空の吹き出しは故障に見える
+    NO_ANSWER = "（答えが返りませんでした。max_tokens を増やすか、別のモデルを試してみてください）"
+
     def __init__(
         self,
         ai: Ai,
@@ -527,8 +530,20 @@ class Talk:
         prompt = self._prompt(message)
         self.conversation.say(message)
         answer = await self._ai.ask(prompt, max_tokens=self.max_tokens)
-        self.conversation.reply(self._clean(answer))
+        self.conversation.reply(self._clean(answer) or self.NO_ANSWER)
         return self.conversation
+
+    def _waiting(self):
+        """答えを待つあいだ、AI の側に出しておくもの。
+
+        読み込みと生成を分けて言う。初回の読み込みは数分かかることがあり、
+        同じ「考え中」だと止まっているのか進んでいるのか分からない。
+        """
+        from . import ui
+
+        if self._ai.is_loaded():
+            return ui.thinking()
+        return ui.thinking("モデルを読み込んでいます（初回は数分かかります）")
 
     async def stream(self, message: object):
         """同じことを、書けたところから少しずつ返す。
@@ -540,16 +555,26 @@ class Talk:
 
         prompt = self._prompt(message)
         self.conversation.say(message)
+
+        def view(content):
+            return ui.conversation(
+                [*self.messages, {"role": "assistant", "content": content}],
+                names=self.conversation.names,
+            )
+
+        # 打った内容を、答えを待たずに先に返す。ここを待ってから出すと、
+        # 画面には「考え中」しか無い時間が続き、送れたのかどうかも分からない
+        yield view(self._waiting())
+
         text = ""
         async for chunk in self._ai.stream(prompt, max_tokens=self.max_tokens):
             text += chunk
             partial = self._clean(text)
             if partial:
-                yield ui.conversation(
-                    [*self.messages, {"role": "assistant", "content": partial}],
-                    names=self.conversation.names,
-                )
-        self.conversation.reply(self._clean(text))
+                yield view(partial)
+        # 一文字も出ないまま終わることがある（考えている途中だけを書いて
+        # 字数が尽きた場合など）。空の吹き出しは故障に見えるので、そう言う
+        self.conversation.reply(self._clean(text) or self.NO_ANSWER)
         yield self.conversation
 
     def form(self, placeholder: str = "メッセージを入力", submit_label: str = "送信", **kwargs):
@@ -702,6 +727,16 @@ class Ai:
     def __init__(self) -> None:
         self._pipe = None
         self._name: str | None = None
+
+    def is_loaded(self) -> bool:
+        """モデルの準備ができているか。
+
+        まだなら、最初の :meth:`ask` / :meth:`stream` の中で読み込みが走る。
+        初回は数分かかることがあるので、待たせる側はこれを見て言葉を変える。
+        """
+        if in_browser():
+            return self._name is not None
+        return self._pipe is not None
 
     async def models(self) -> list[dict]:
         """選べるモデルの一覧（名前と目安の通信量）。
