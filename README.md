@@ -7,6 +7,17 @@ Google Colab と PyHiroba で、同じコードが同じように動く教育向
 | `ui` | カード・クイズ・進捗バーといったコンポーネントを、ノートブックのセル出力に表示します |
 | `ai` | LLM を、その場（ブラウザまたはノートブック）で動かします |
 
+## ノートブック（Colab でそのまま開けます）
+
+| ノートブック | 内容 | |
+|---|---|---|
+| [`chat.ipynb`](notebooks/chat.ipynb) | AI とチャットする（`ai.talk()`／`ui.conversation()`） | [![Colab で開く](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/funakoshi-takehiro/library-hiroba/blob/main/notebooks/chat.ipynb) |
+| [`demo_ai.ipynb`](notebooks/demo_ai.ipynb) | `ai` のひととおり（モデル選び・逐次出力） | [![Colab で開く](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/funakoshi-takehiro/library-hiroba/blob/main/notebooks/demo_ai.ipynb) |
+| [`demo_colab.ipynb`](notebooks/demo_colab.ipynb) | `ui` の部品を並べて見る | [![Colab で開く](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/funakoshi-takehiro/library-hiroba/blob/main/notebooks/demo_colab.ipynb) |
+| [`html_css_recipes.ipynb`](notebooks/html_css_recipes.ipynb) | `ui.html()` で作る見た目の作例 | [![Colab で開く](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/funakoshi-takehiro/library-hiroba/blob/main/notebooks/html_css_recipes.ipynb) |
+
+`ai` を使うノートブックは、初回にモデルの取得（数百 MB〜）が入ります。
+
 ## インストール
 
 Google Colab と Jupyter:
