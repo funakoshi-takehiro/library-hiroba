@@ -18,18 +18,22 @@ Google Colab と PyHiroba で、同じコードが同じように動く教育向
 
 `ai` を使うノートブックは、初回にモデルの取得（数百 MB〜）が入ります。
 
+> **一度動かしたあとで版を上げたとき。** Google Colab では、`pip install` でファイルを入れ替えても、**すでに読み込み済みのモジュールは差し替わりません**。更新したのに動きが変わらない場合は、メニューの「ランタイム」→「セッションを再起動する」を実行してから、上から順に実行し直してください。ノートブックの1つめのセルが、この状態になっていないかを確かめて知らせます。
+
 ## インストール
 
 Google Colab と Jupyter:
 
 ```
-!pip install library-hiroba
+!pip install -U library-hiroba
 ```
+
+`-U` を付けるのは、すでに古い版が入っている環境で入れ替えるためです。付けないと「要件は満たされています」と表示されて、そのままになります。
 
 Google Colab で `ai` も使うときは、追加の依存（transformers と torch）を含めます。
 
 ```
-!pip install "library-hiroba[ai]"
+!pip install -U "library-hiroba[ai]"
 ```
 
 PyHiroba では `import library_hiroba` で使えます。`ai` の実行はブラウザ側の経路を使うため、追加のインストールは要りません。
@@ -186,7 +190,7 @@ print(await ai.ask("俳句を1つ作って", max_tokens=64))
 | 環境 | 動かし方 | 用意するもの |
 |---|---|---|
 | PyHiroba | ブラウザの中で動きます（本体が用意した経路を使います） | なし |
-| Google Colab・Jupyter | `transformers` と `torch` で動きます | `!pip install "library-hiroba[ai]"` |
+| Google Colab・Jupyter | `transformers` と `torch` で動きます | `!pip install -U "library-hiroba[ai]"` |
 
 ### 選べるモデル
 
