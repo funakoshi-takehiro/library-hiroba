@@ -11,6 +11,7 @@ import asyncio
 import inspect
 import json
 import sys
+import threading
 import time
 import types
 
@@ -1346,3 +1347,144 @@ def test_is_loaded_reports_the_right_thing_per_environment(fresh_ai, monkeypatch
     assert not fresh_ai.is_loaded()
     fresh_ai._name = "qwen05-q8"
     assert fresh_ai.is_loaded()
+
+
+# --- 生成が止まったときの逃げ道 ---------------------------------------------
+
+
+def install_streaming_transformers(monkeypatch, produce):
+    """TextIteratorStreamer つきの代役。``produce(streamer)`` が生成側の中身。"""
+    import queue
+
+    class TextIteratorStreamer:
+        def __init__(self, tokenizer, skip_prompt=True, skip_special_tokens=True, timeout=None):
+            self.timeout = timeout
+            self._queue: queue.Queue = queue.Queue()
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            value = self._queue.get(timeout=self.timeout)
+            if value is None:
+                raise StopIteration
+            return value
+
+        def put(self, text):
+            self._queue.put(text)
+
+        def end(self):
+            self._queue.put(None)
+
+    recorded = install_fake_transformers(monkeypatch)
+    sys.modules["transformers"].TextIteratorStreamer = TextIteratorStreamer
+
+    def run_pipe(messages, streamer=None, **kwargs):
+        produce(streamer)
+        return [{"generated_text": [{"role": "assistant", "content": ""}]}]
+
+    def pipeline(*a, **k):
+        holder = run_pipe
+        holder.tokenizer = object()
+        return holder
+
+    monkeypatch.setattr(sys.modules["transformers"], "pipeline", pipeline)
+    return recorded
+
+
+def test_a_generation_that_goes_quiet_gives_up_instead_of_waiting_forever(
+    fresh_ai, monkeypatch
+):
+    """timeout を渡さないと next() は永久に待ち、考え中から抜けられない（S3）。
+
+    Colab で実際にそうなった。上限を切って、待ち続けずに理由を言う。
+    """
+    install_streaming_transformers(monkeypatch, produce=lambda streamer: None)  # 何も出さない
+    monkeypatch.setattr(_ai, "STREAM_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(_ai, "STREAM_POLL_SECONDS", 0.05)
+    run(fresh_ai.load("llmjp150m"))
+
+    async def drain():
+        return [c async for c in fresh_ai.stream("やあ")]
+
+    # 上限が抜けると本当に永久に待つので、テスト自体を止まらせない形で確かめる
+    # （そのまま pytest.raises で囲むと、退行したとき失敗ではなく停止になる）
+    outcome = {}
+
+    def attempt():
+        try:
+            run(drain())
+        except BaseException as error:  # noqa: BLE001 — 呼び出し側へ運ぶ
+            outcome["error"] = error
+
+    worker = threading.Thread(target=attempt, daemon=True)
+    worker.start()
+    worker.join(timeout=20)
+    assert not worker.is_alive(), "上限が切られておらず、いつまでも待ち続けています"
+    assert isinstance(outcome.get("error"), TimeoutError), outcome
+    assert "何も返しませんでした" in str(outcome["error"])
+
+
+def test_the_streamer_is_given_a_deadline(fresh_ai, monkeypatch):
+    """上限そのものが渡っていること（渡し忘れると永久待ちに戻る）（S3）。"""
+    seen = {}
+
+    def produce(streamer):
+        seen["timeout"] = streamer.timeout
+        streamer.put("答え")
+        streamer.end()
+
+    install_streaming_transformers(monkeypatch, produce)
+    run(fresh_ai.load("llmjp150m"))
+
+    async def drain():
+        return [c async for c in fresh_ai.stream("やあ")]
+
+    assert run(drain()) == ["答え"]
+    # 1回の待ちは区切った長さ。通算の上限は呼び出し側が数える
+    assert seen["timeout"] == _ai.STREAM_POLL_SECONDS
+
+
+def test_two_generations_at_once_are_refused(fresh_ai, monkeypatch):
+    """pipeline はスレッド安全ではない。同時に走らせると両方壊れる（S3）。
+
+    フォームの送信中にノートブックのセルからもう1回聞くと、実際に起きる。
+    """
+    install_streaming_transformers(monkeypatch, produce=lambda s: (s.put("答え"), s.end()))
+    run(fresh_ai.load("llmjp150m"))
+    fresh_ai._generating.acquire()  # 1本目が走っている状態
+
+    async def drain():
+        return [c async for c in fresh_ai.stream("やあ")]
+
+    with pytest.raises(RuntimeError, match="前の生成がまだ終わっていません"):
+        run(drain())
+    fresh_ai._generating.release()
+    assert run(drain()) == ["答え"]  # 終われば次は通る
+
+
+def test_the_lock_is_released_even_when_generation_fails(fresh_ai, monkeypatch):
+    """落ちたまま鍵を持ち続けると、以後ずっと聞けなくなる（S3）。"""
+
+    def explode(streamer):
+        raise RuntimeError("生成が落ちた")
+
+    install_streaming_transformers(monkeypatch, explode)
+    run(fresh_ai.load("llmjp150m"))
+
+    async def drain():
+        return [c async for c in fresh_ai.stream("やあ")]
+
+    with pytest.raises(RuntimeError, match="生成が落ちた"):
+        run(drain())
+    assert not fresh_ai._generating.locked(), "落ちたあとも鍵を持ったままです"
+
+
+def test_waiting_shows_how_long_it_has_been():
+    """動かない「考え中」は故障と見分けが付かない（S3）。"""
+    talk, _ = make_talk()
+    assert "秒" not in talk._waiting(0.0)._repr_html_()
+    assert "12秒" in talk._waiting(12.3)._repr_html_()
+    loading, _ = make_talk(loaded=False)
+    assert "モデルを読み込んでいます" in loading._waiting(5.0)._repr_html_()
+    assert "5秒" in loading._waiting(5.0)._repr_html_()

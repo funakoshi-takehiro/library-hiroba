@@ -142,6 +142,16 @@ MODELS = {
 
 DEFAULT_MODEL = "qwen05"
 
+# 次の1文字を待つ上限（秒）。ここを無しにすると永久に待つため、生成側が黙って
+# 止まったときに「考え中」から抜けられなくなる。1文字あたりの上限なので、
+# CPU だけで大きめのモデルを動かす場合を見込んで長めにとる。
+STREAM_TIMEOUT_SECONDS = 300.0
+
+# 上の上限を、この長さに区切って待つ。1回の待ちを短くしておかないと、生成が
+# 詰まったときに待ち役のスレッドが解放されず、後片付けでぶら下がる
+# （run_in_executor の既定スレッドは終了時に join されるため）。
+STREAM_POLL_SECONDS = 1.0
+
 # ブラウザ固有の名前 → 共通の名前
 _VARIANT_TO_BASE = {
     variant: base for base, spec in MODELS.items() for variant in spec["browser_variants"]
@@ -533,17 +543,23 @@ class Talk:
         self.conversation.reply(self._clean(answer) or self.NO_ANSWER)
         return self.conversation
 
-    def _waiting(self):
+    #: 待っているあいだ、経過を出し直す間隔（秒）
+    TICK_SECONDS = 1.0
+
+    def _waiting(self, seconds: float = 0.0):
         """答えを待つあいだ、AI の側に出しておくもの。
 
-        読み込みと生成を分けて言う。初回の読み込みは数分かかることがあり、
-        同じ「考え中」だと止まっているのか進んでいるのか分からない。
+        **経過した秒数を出す。** 止まっているのか進んでいるのかが、これでしか
+        分からない。動かない「考え中」は、故障と見分けが付かない。
+
+        読み込みと生成も分けて言う。初回の読み込みは数分かかることがある。
         """
         from . import ui
 
+        passed = f"{int(seconds)}秒" if seconds >= 1 else ""
         if self._ai.is_loaded():
-            return ui.thinking()
-        return ui.thinking("モデルを読み込んでいます（初回は数分かかります）")
+            return ui.thinking(f"考え中 {passed}".strip())
+        return ui.thinking(f"モデルを読み込んでいます（初回は数分かかります）{passed}")
 
     async def stream(self, message: object):
         """同じことを、書けたところから少しずつ返す。
@@ -551,6 +567,9 @@ class Talk:
         書きかけは会話に入れず、**その回だけの写しに載せて**返す。入れてしまうと
         次の質問に渡す記憶が、書きかけの文で埋まる。
         """
+        import asyncio
+        import time
+
         from . import ui
 
         prompt = self._prompt(message)
@@ -564,10 +583,27 @@ class Talk:
 
         # 打った内容を、答えを待たずに先に返す。ここを待ってから出すと、
         # 画面には「考え中」しか無い時間が続き、送れたのかどうかも分からない
+        started = time.monotonic()
         yield view(self._waiting())
 
         text = ""
-        async for chunk in self._ai.stream(prompt, max_tokens=self.max_tokens):
+        # 1文字ずつ待つあいだも、経過を出し直す。じっと動かない「考え中」は
+        # 故障と見分けが付かず、実際それで何度も止まったと判断された。
+        # __anext__ を task にして待つ（wait_for は待ちきれないと相手を
+        # 取り消してしまい、途中まで進んだ生成が壊れる）
+        source = self._ai.stream(prompt, max_tokens=self.max_tokens).__aiter__()
+        while True:
+            coming = asyncio.ensure_future(source.__anext__())
+            try:
+                while not (await asyncio.wait({coming}, timeout=self.TICK_SECONDS))[0]:
+                    if not self._clean(text):
+                        yield view(self._waiting(time.monotonic() - started))
+                chunk = coming.result()
+            except StopAsyncIteration:
+                break
+            except BaseException:
+                coming.cancel()
+                raise
             text += chunk
             partial = self._clean(text)
             if partial:
@@ -725,8 +761,12 @@ class Ai:
     """小さな言語モデルを動かす。PyHiroba と Colab で同じ使い方ができる。"""
 
     def __init__(self) -> None:
+        import threading
+
         self._pipe = None
         self._name: str | None = None
+        # 生成が同時に2本走らないようにする（下の _stream_with_transformers 参照）
+        self._generating = threading.Lock()
 
     def is_loaded(self) -> bool:
         """モデルの準備ができているか。
@@ -1032,6 +1072,7 @@ class Ai:
         """
         import asyncio
         import threading
+        from queue import Empty
 
         try:
             from transformers import TextIteratorStreamer
@@ -1040,11 +1081,25 @@ class Ai:
             yield self._ask_with_transformers(prompt, max_tokens)
             return
 
+        # timeout を渡さないと、次の1文字を「永久に」待つ。生成側が黙って
+        # 止まった場合、画面は考え中のまま構造上ぜったいに抜けられなくなる。
+        # ここは1文字あたりの上限なので、CPU だけの環境でも十分に長くとる。
         streamer = TextIteratorStreamer(
-            self._pipe.tokenizer, skip_prompt=True, skip_special_tokens=True
+            self._pipe.tokenizer,
+            skip_prompt=True,
+            skip_special_tokens=True,
+            timeout=STREAM_POLL_SECONDS,
         )
         messages = [{"role": "user", "content": str(prompt)}]
         failure: list[BaseException] = []
+
+        # 同じ pipeline を2本のスレッドから同時に叩かない。transformers の
+        # pipeline はスレッド安全ではなく、フォームの送信中にノートブックの
+        # セルからもう1回聞くと、両方が壊れて片方が返らなくなる
+        if not self._generating.acquire(blocking=False):
+            raise RuntimeError(
+                "前の生成がまだ終わっていません。終わるのを待ってから、もう一度試してください。"
+            )
 
         def generate() -> None:
             try:
@@ -1056,6 +1111,8 @@ class Ai:
             except BaseException as error:  # noqa: BLE001 — 呼び出し側へ運ぶ
                 failure.append(error)
                 streamer.end()
+            finally:
+                self._generating.release()
 
         worker = threading.Thread(target=generate, daemon=True)
         worker.start()
@@ -1064,8 +1121,21 @@ class Ai:
         iterator = iter(streamer)
         stop = object()
         thinking = ThinkingFilter()
+        silent = 0.0
         while True:
-            piece = await loop.run_in_executor(None, lambda: next(iterator, stop))
+            try:
+                piece = await loop.run_in_executor(None, lambda: next(iterator, stop))
+            except Empty:
+                # まだ1文字も来ていない。短く区切って待ち直し、通算で上限を超えたら諦める
+                silent += STREAM_POLL_SECONDS
+                if silent < STREAM_TIMEOUT_SECONDS:
+                    continue
+                raise TimeoutError(
+                    f"モデルが {STREAM_TIMEOUT_SECONDS:.0f} 秒のあいだ何も返しませんでした。"
+                    "軽いモデル（ai.load('llmjp150m')）を試すか、"
+                    "セッションを再起動してからやり直してください。"
+                ) from None
+            silent = 0.0
             if piece is stop:
                 break
             chunk = thinking.feed(piece)
