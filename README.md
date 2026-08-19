@@ -12,6 +12,7 @@ Google Colab と PyHiroba で、同じコードが同じように動く教育向
 | ノートブック | 内容 | |
 |---|---|---|
 | [`chat.ipynb`](notebooks/chat.ipynb) | AI とチャットする（`ai.talk()`／`ui.conversation()`） | [![Colab で開く](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/funakoshi-takehiro/library-hiroba/blob/main/notebooks/chat.ipynb) |
+| [`book_search.ipynb`](notebooks/book_search.ipynb) | 意味で探す蔵書検索（`ai.search()`） | [![Colab で開く](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/funakoshi-takehiro/library-hiroba/blob/main/notebooks/book_search.ipynb) |
 | [`demo_ai.ipynb`](notebooks/demo_ai.ipynb) | `ai` のひととおり（モデル選び・逐次出力） | [![Colab で開く](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/funakoshi-takehiro/library-hiroba/blob/main/notebooks/demo_ai.ipynb) |
 | [`demo_colab.ipynb`](notebooks/demo_colab.ipynb) | `ui` の部品を並べて見る | [![Colab で開く](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/funakoshi-takehiro/library-hiroba/blob/main/notebooks/demo_colab.ipynb) |
 | [`html_css_recipes.ipynb`](notebooks/html_css_recipes.ipynb) | `ui.html()` で作る見た目の作例 | [![Colab で開く](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/funakoshi-takehiro/library-hiroba/blob/main/notebooks/html_css_recipes.ipynb) |
@@ -269,6 +270,34 @@ chat.form()
 **この書き方も Colab と PyHiroba の両方で動きます。** PyHiroba 本体は 2026-08-09 にフォームへ対応しました。それ以前の本体で開いた場合は、`talk.form()` が「この本体では動きません」という注意書きを添えて表示します（本体が名乗る対応機能を見て出し分けています）。
 
 組み立てを自分で書きたい場合は、`ai.stream()` を `yield` で回す形も使えます。`ai.stream()` を全部つなげると `ai.ask()` と同じ文になります。少しずつ返せない環境では、書き終えてから一度にまとめて返すため、どちらでも同じコードが動きます。考えている途中（`<think>`）は、途中で切れても取り除かれます。
+
+### 意味で探す（文をベクトルにする）
+
+`ai.embed()` は、文を「意味を表す数のならび（ベクトル）」にします。言葉が一致していなくても、**意味が近ければ近い数**になります。
+
+```python
+hits = await ai.search("怖い本を教えて", [b["desc"] for b in books], top_k=3)
+for hit in hits:
+    print(books[hit["index"]]["title"], round(hit["score"], 3))
+```
+
+`ai.search()` は `{"index", "score", "text"}` の並びを、近い順に返します。`score` は −1〜1 で、1 に近いほど意味が近いです。
+
+中身は `ai.embed()` と掛け算だけです。
+
+```python
+vectors = await ai.embed([b["desc"] for b in books])   # list[list[float]]
+question = await ai.embed("怖い本を教えて")             # list[float]
+
+# 長さが 1 にそろえてある（正規化済み）ので、掛けて足すだけで近さになる
+score = sum(q * v for q, v in zip(question, vectors[0]))
+```
+
+`ai.load()` は要りません。最初に呼んだときにモデル（約118MB）が読み込まれます。生成用のモデルとは**別物**なので、`ai.load()` の状態とは互いに影響しません。
+
+> **索引と検索は、同じ環境で作ってください。** ブラウザ（PyHiroba）は int8、Google Colab は fp32 で計算するため、同じ文でもベクトルがわずかに違います。同じ環境の中で比べるぶんには問題ありませんが、混ぜると順位が変わることがあります。また1文は 512 トークンで切り詰められるので、本文まるごとではなく説明文（数文）を対象にしてください。
+
+件数が多くても、そのまま渡して構いません。PyHiroba 本体は一度に 256 件までですが、`embed()` が自動で分けて渡します。
 
 モデルのライセンスは配布元をご確認ください（既定の Qwen2.5 は Apache-2.0）。
 

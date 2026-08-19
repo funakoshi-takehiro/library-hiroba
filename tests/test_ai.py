@@ -1488,3 +1488,253 @@ def test_waiting_shows_how_long_it_has_been():
     loading, _ = make_talk(loaded=False)
     assert "モデルを読み込んでいます" in loading._waiting(5.0)._repr_html_()
     assert "5秒" in loading._waiting(5.0)._repr_html_()
+
+
+# --- 埋め込み（ai.embed / ai.search） ---------------------------------------
+
+
+def fake_embed_host(monkeypatch, dim=4, features="forms,ai,ai-probe,ai-embed"):
+    """本体の ai-embed の代役。渡された texts を記録し、正規化済みを返す。"""
+    sent = []
+
+    def unit(seed, size):
+        raw = [((seed * 7 + i * 13) % 11) + 1 for i in range(size)]
+        length = sum(v * v for v in raw) ** 0.5
+        return [v / length for v in raw]
+
+    async def ask(kind, args_json):
+        args = json.loads(args_json)
+        if kind != "ai-embed":
+            return json.dumps({})
+        sent.append(args)
+        texts = args["texts"]
+        return json.dumps(
+            {"vectors": [unit(len(t), dim) for t in texts], "dim": dim, "model": args["model"]}
+        )
+
+    js = types.ModuleType("js")
+    js.pyhirobaAsk = ask
+    if features is not None:
+        js.pyhirobaFeatures = features
+    monkeypatch.setitem(sys.modules, "js", js)
+    return sent
+
+
+def test_embedding_models_are_kept_out_of_the_chat_list():
+    """同じ辞書に入れると ai.models() / load() / recommend() が壊れる（E1）。"""
+    assert not set(_ai.EMBED_MODELS) & set(_ai.MODELS)
+    # ai.load() は埋め込みモデルを受け付けない
+    with pytest.raises(ValueError, match="選べません"):
+        _ai.resolve("minilm")
+    # おすすめの判断材料（rank）を持たない＝recommend() の対象にならない
+    for spec in _ai.EMBED_MODELS.values():
+        assert "rank" not in spec and "needs" not in spec
+
+
+def test_the_model_list_only_shows_models_you_can_load(fresh_ai, fake_transformers):
+    """ai.models() に、生成できないモデルを混ぜない（E1）。"""
+    listed = {entry["name"] for entry in run(fresh_ai.models())}
+    assert listed == set(_ai.MODELS)
+    assert not listed & set(_ai.EMBED_MODELS)
+
+
+@pytest.mark.parametrize("name", sorted(_ai.EMBED_MODELS))
+def test_both_paths_use_the_same_embedding_model(name):
+    """環境で違うモデルが動くと、同じ文のベクトルが別物になる（E1）。"""
+    spec = _ai.EMBED_MODELS[name]
+    assert _bare_model_name(spec["colab_id"]) == _bare_model_name(spec["browser_repo"])
+    assert "/" in spec["colab_id"] and "/" in spec["browser_repo"]
+    assert isinstance(spec["dim"], int)
+
+
+def test_unknown_embedding_model_is_rejected():
+    assert _ai.resolve_embed(None) == _ai.DEFAULT_EMBED_MODEL
+    assert _ai.resolve_embed("minilm") == "minilm"
+    with pytest.raises(ValueError, match="選べません"):
+        _ai.resolve_embed("qwen05")  # チャット用は通さない
+
+
+def test_embed_returns_one_vector_for_a_string(fresh_ai, monkeypatch):
+    """str なら1本、リストなら同じ順で返す（E2）。"""
+    fake_embed_host(monkeypatch)
+    one = run(fresh_ai.embed("怖い本"))
+    assert isinstance(one, list) and isinstance(one[0], float)
+
+    many = run(fresh_ai.embed(["怖い本", "料理の本"]))
+    assert len(many) == 2 and isinstance(many[0], list)
+    # 1件のリストは、入れ子のまま返す（str とは形が違う）
+    assert isinstance(run(fresh_ai.embed(["怖い本"]))[0], list)
+
+
+def test_embed_of_nothing_is_nothing(fresh_ai, monkeypatch):
+    sent = fake_embed_host(monkeypatch)
+    assert run(fresh_ai.embed([])) == []
+    assert sent == [], "空なら本体を呼ばない"
+
+
+def test_embed_splits_large_batches_so_both_environments_agree(fresh_ai, monkeypatch):
+    """本体は 257 件以上を断る。素通しすると Colab とだけ結果が変わる（E2）。"""
+    sent = fake_embed_host(monkeypatch)
+    texts = [f"本{i}" for i in range(600)]
+    vectors = run(fresh_ai.embed(texts))
+    assert len(vectors) == 600
+    assert [len(call["texts"]) for call in sent] == [256, 256, 88]
+    # 分けても順番は保つ
+    assert sum(len(call["texts"]) for call in sent) == 600
+
+
+def test_embed_says_so_on_a_host_without_the_feature(fresh_ai, monkeypatch):
+    """版ではなく目印で判定する。目印が無ければ理由の分かるエラー（E2）。"""
+    fake_embed_host(monkeypatch, features="forms,ai,ai-probe")
+    with pytest.raises(RuntimeError, match="まだ文のベクトル化に対応していません"):
+        run(fresh_ai.embed("やあ"))
+
+
+def test_embed_sends_the_agreed_shape(fresh_ai, monkeypatch):
+    """本体と凍結した契約どおりの JSON を投げること（E2）。"""
+    sent = fake_embed_host(monkeypatch)
+    run(fresh_ai.embed(["あ", "い"], model="minilm"))
+    assert sent == [{"model": "minilm", "texts": ["あ", "い"]}]
+
+
+def test_a_host_that_returns_unnormalized_vectors_is_caught(fresh_ai, monkeypatch):
+    """正規化されていないと内積がコサインにならず、近い順が静かに狂う（E2）。"""
+
+    async def ask(kind, args_json):
+        texts = json.loads(args_json)["texts"]
+        return json.dumps({"vectors": [[3.0, 4.0] for _ in texts], "dim": 2})
+
+    js = types.ModuleType("js")
+    js.pyhirobaAsk = ask
+    js.pyhirobaFeatures = "ai-embed"
+    monkeypatch.setitem(sys.modules, "js", js)
+    with pytest.raises(RuntimeError, match="正規化されていません"):
+        run(fresh_ai.embed("やあ"))
+
+
+def test_a_host_that_returns_the_wrong_count_is_caught(fresh_ai, monkeypatch):
+    async def ask(kind, args_json):
+        return json.dumps({"vectors": [[1.0]], "dim": 1})
+
+    js = types.ModuleType("js")
+    js.pyhirobaAsk = ask
+    js.pyhirobaFeatures = "ai-embed"
+    monkeypatch.setitem(sys.modules, "js", js)
+    with pytest.raises(RuntimeError, match="ベクトルの数が合いません"):
+        run(fresh_ai.embed(["あ", "い"]))
+
+
+def test_a_refusal_from_the_host_is_readable(fresh_ai, monkeypatch):
+    """本体が断った理由（日本語）が、そのまま読める形で出ること（E2）。"""
+
+    async def ask(kind, args_json):
+        raise RuntimeError("一度に渡せるのは256件までです。分割してください")
+
+    js = types.ModuleType("js")
+    js.pyhirobaAsk = ask
+    js.pyhirobaFeatures = "ai-embed"
+    monkeypatch.setitem(sys.modules, "js", js)
+    with pytest.raises(RuntimeError, match="一度に渡せるのは256件までです"):
+        run(fresh_ai.embed("やあ"))
+
+
+def test_search_ranks_by_meaning(fresh_ai, monkeypatch):
+    """近い順に並べ、index と text を添えて返す（E3）。"""
+    monkeypatch.setattr(
+        _ai.Ai, "embed", lambda self, texts, model=None: _canned(texts)
+    )
+    hits = run(fresh_ai.search("怖い本", ["料理", "怪談", "宇宙"]))
+    assert [hit["index"] for hit in hits] == [1, 0, 2]
+    assert hits[0]["text"] == "怪談"
+    assert hits[0]["score"] > hits[-1]["score"]
+
+
+async def _canned(texts):
+    """query が「怪談」にいちばん近い、という決め打ちのベクトル。"""
+    table = {"怖い本": [1.0, 0.0], "怪談": [0.96, 0.28], "料理": [0.6, 0.8], "宇宙": [0.0, 1.0]}
+    return [table[text] for text in texts]
+
+
+def test_search_top_k_and_validation(fresh_ai, monkeypatch):
+    monkeypatch.setattr(_ai.Ai, "embed", lambda self, texts, model=None: _canned(texts))
+    assert len(run(fresh_ai.search("怖い本", ["料理", "怪談", "宇宙"], top_k=2))) == 2
+    assert run(fresh_ai.search("怖い本", [])) == []
+    for bad in (0, -1, True, 1.5):
+        with pytest.raises(ValueError, match="top_k"):
+            run(fresh_ai.search("怖い本", ["料理"], top_k=bad))
+
+
+def test_search_asks_the_host_only_once(fresh_ai, monkeypatch):
+    """質問と文書を別々に投げると往復が2回になる（E3）。"""
+    sent = fake_embed_host(monkeypatch)
+    run(fresh_ai.search("怖い本", ["料理", "怪談"]))
+    assert len(sent) == 1
+    assert sent[0]["texts"] == ["怖い本", "料理", "怪談"]
+
+
+def test_colab_pooling_ignores_padding_and_normalizes(fresh_ai, monkeypatch):
+    """Colab 側の平均プーリングを実数値で確かめる（E4）。
+
+    短い文には padding が付く。これを平均に混ぜると、文の長さでベクトルが
+    変わってしまい、検索の順位が狂う。**混ざっていないこと**を数で見る。
+    """
+    torch = pytest.importorskip("torch")
+
+    # 1文目は2語＋padding、2文目は3語。padding には極端な値を入れてあるので、
+    # 混ざっていれば結果が大きくずれる
+    hidden = torch.tensor(
+        [
+            [[1.0, 0.0], [3.0, 0.0], [999.0, 999.0]],
+            [[0.0, 1.0], [0.0, 3.0], [0.0, 2.0]],
+        ]
+    )
+    mask = torch.tensor([[1, 1, 0], [1, 1, 1]])
+
+    class FakeModel:
+        def eval(self):
+            return self
+
+        def __call__(self, **_):
+            return types.SimpleNamespace(last_hidden_state=hidden)
+
+    def tokenizer(texts, **_):
+        return {"input_ids": torch.zeros_like(mask), "attention_mask": mask}
+
+    fake = types.ModuleType("transformers")
+    fake.AutoModel = types.SimpleNamespace(from_pretrained=lambda repo: FakeModel())
+    fake.AutoTokenizer = types.SimpleNamespace(from_pretrained=lambda repo: tokenizer)
+    monkeypatch.setitem(sys.modules, "transformers", fake)
+    monkeypatch.delitem(sys.modules, "js", raising=False)
+
+    got = fresh_ai._embed_with_transformers(["みじかい文", "すこし長い文"], "minilm")
+
+    # padding を除いた平均は [2,0] と [0,2]。正規化すると [1,0] と [0,1]
+    assert got[0] == pytest.approx([1.0, 0.0], abs=1e-6)
+    assert got[1] == pytest.approx([0.0, 1.0], abs=1e-6)
+    # 長さが 1（＝内積がそのままコサイン類似度になる）
+    for vector in got:
+        assert sum(v * v for v in vector) ** 0.5 == pytest.approx(1.0, abs=1e-6)
+
+
+def test_the_embedder_is_loaded_once_and_is_not_the_chat_model(fresh_ai, monkeypatch):
+    """埋め込みは生成とは別のモデル。load() の状態と混ざらないこと（E4）。"""
+    pytest.importorskip("torch")
+    built = []
+
+    class FakeModel:
+        def eval(self):
+            return self
+
+    fake = types.ModuleType("transformers")
+    fake.AutoModel = types.SimpleNamespace(
+        from_pretrained=lambda repo: built.append(repo) or FakeModel()
+    )
+    fake.AutoTokenizer = types.SimpleNamespace(from_pretrained=lambda repo: object())
+    monkeypatch.setitem(sys.modules, "transformers", fake)
+
+    fresh_ai._load_embedder("minilm")
+    fresh_ai._load_embedder("minilm")
+    assert built == [_ai.EMBED_MODELS["minilm"]["colab_id"]], "2回目は読み直さない"
+    # 生成側は手つかず＝ai.load() と互いに影響しない
+    assert fresh_ai._pipe is None and fresh_ai._name is None
+    assert not fresh_ai.is_loaded()

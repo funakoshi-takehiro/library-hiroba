@@ -99,6 +99,29 @@ self.pyhirobaFeatures = 'forms,ai,ai-probe'
 - `id` を返さない、または `ai-ask-start` で失敗した場合、library-hiroba は `ai-ask` に切り替えます。**未対応であることを伝えるために、わざわざ何かを実装する必要はありません**
 - `<think>…</think>` はライブラリ側で取り除きます。チャンクの境目で割れていても大丈夫なので、本体は分割位置を気にしなくて構いません
 
+### 文をベクトルにする（`ai-embed`）
+
+`ai.embed()` / `ai.search()` が使います。**対応は目印で判定します** — `pyhirobaFeatures` に `ai-embed` が無ければ、library 側で「まだ対応していません」と伝えて呼びません（版は見ません）。
+
+| `kind` | 渡す JSON | 期待する JSON |
+|---|---|---|
+| `ai-embed` | `{"model": "minilm", "texts": ["…", "…"]}` | `{"vectors": [[…384…]], "dim": 384, "device": "wasm", "model": "minilm"}` |
+
+- **ベクトルは L2 正規化済み**（mean pooling + normalize）でお願いします。内積がそのままコサイン類似度になる前提で `search()` を作っています。**library 側でも1本だけ長さを検算します**（正規化されていないと近い順が静かに狂い、気付けないため）
+- `texts` が空なら `{"vectors": [], …}` を返してください
+- **一度に渡すのは 256 件まで**にしてあります。それ以上は library 側で分けて複数回呼びます。素通しすると、同じコードが PyHiroba で失敗して Colab で成功する、という食い違いになるためです
+- 断るとき（Promise の reject）の理由は日本語でお願いします。`_call_host` がそれを包んで利用者に見せます
+
+使うモデルは1つだけです。**チャットの `MODELS` とは別の一覧**（`EMBED_MODELS`）に置いてあり、`ai.load()` には通しません。
+
+| キー | 本体が読む ONNX | Colab で使う id | 次元 |
+|---|---|---|---|
+| `minilm`（既定） | `Xenova/paraphrase-multilingual-MiniLM-L12-v2` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | 384 |
+
+> **int8（`model_quantized.onnx` / 118MB）を使ってください。** このモデルも q4 のほうが大きくなります（399MB）。語彙が 250037 と大きく、q4 では埋め込み（`Gather`）が fp32 のまま残るためで、Qwen3 0.6B と同じ理由です。
+>
+> Colab 側は `sentence-transformers` を使わず、`transformers` + `torch` で mean pooling と L2 正規化を自前で行っています（`sentence-transformers` は `transformers>=5` を要求し、scikit-learn と scipy を連れてくるため）。**本体と同じ処理なので、両経路で同じ意味のベクトルになります**（int8 と fp32 の差で値は完全一致しません。索引と検索は同じ環境で作る前提です）。
+
 ### 端末を調べる（任意）
 
 `ai.recommend()` と `ai.load("auto")` は、その端末で実用になるモデルのうちいちばん良いものを選びます。WebGPU の無い端末に 1.7B を読ませると画面が固まり、逆に動く端末で 150M を使うと答えが不自然になるためです。**対応は任意です** — 本体が知らなければ「調べられなかった」として、環境によらず既定の `qwen05` に落ちます。

@@ -152,6 +152,71 @@ STREAM_TIMEOUT_SECONDS = 300.0
 # （run_in_executor の既定スレッドは終了時に join されるため）。
 STREAM_POLL_SECONDS = 1.0
 
+# ---------------------------------------------------------------------------
+# 埋め込み（文を数のならびにする）モデル
+# ---------------------------------------------------------------------------
+# **チャットの MODELS とは別にする。** 同じ辞書に入れると、次の3つが壊れる。
+#   - ai.models() の一覧に、生成できないモデルが「選べるもの」として並ぶ
+#   - ai.load("minilm") が通り、生成用でないモデルが _pipe に載って ask() が壊れる
+#   - recommend() が rank を見るので、条件次第で埋め込みモデルを薦めてしまう
+#
+# colab_id と browser_repo は**同じモデルの別形式**でなければいけない
+# （チャット側と同じ約束。テストで名前の一致を確かめている）。
+EMBED_MODELS = {
+    "minilm": {
+        "label": "多言語 MiniLM（文の意味をベクトルにする）",
+        "colab_id": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        "browser_repo": "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+        "approx_mb": {"browser": 118, "colab": 480},
+        "dim": 384,
+    },
+}
+
+DEFAULT_EMBED_MODEL = "minilm"
+
+# 一度に本体へ渡す文の数。本体は 257 件以上を断るので、こちらで分けてから渡す。
+# 素通しすると、同じコードが PyHiroba では失敗して Colab では通ってしまう。
+EMBED_BATCH = 256
+
+
+def resolve_embed(name: str | None) -> str:
+    """埋め込みモデルの名前を確かめる。``ai.load()`` とは別の一覧を見る。"""
+    if name is None:
+        return DEFAULT_EMBED_MODEL
+    name = str(name)
+    if name in EMBED_MODELS:
+        return name
+    raise ValueError(
+        f"その埋め込みモデルは選べません: {name}"
+        f"（選べるのは {list(EMBED_MODELS)}）"
+    )
+
+
+def dot(a, b) -> float:
+    """内積。ベクトルが L2 正規化済みなら、これがそのままコサイン類似度になる。
+
+    numpy は使わない。10冊×384次元なら掛け算 3840 回で、追加の依存を増やす
+    ほどではないため（利用者が教材の中で numpy を使うのは自由）。
+    """
+    return float(sum(x * y for x, y in zip(a, b)))
+
+
+def check_normalized(vector) -> None:
+    """本体が返したベクトルの長さが 1 か確かめる。
+
+    正規化されていないと内積がコサイン類似度にならず、**近い順が静かに狂う**。
+    気付けないまま教材が「なぜかおかしい」状態になるので、ここで止める。
+    """
+    if not vector:
+        return
+    length = sum(x * x for x in vector) ** 0.5
+    if not 0.9 <= length <= 1.1:
+        raise RuntimeError(
+            f"PyHiroba 本体から返ったベクトルが正規化されていません（長さ {length:.3f}）。"
+            "本体側の不具合の可能性があります。"
+        )
+
+
 # ブラウザ固有の名前 → 共通の名前
 _VARIANT_TO_BASE = {
     variant: base for base, spec in MODELS.items() for variant in spec["browser_variants"]
@@ -765,6 +830,9 @@ class Ai:
 
         self._pipe = None
         self._name: str | None = None
+        # 埋め込みは生成とは別のモデルなので、別に持つ（load() とも無関係）
+        self._embedder = None
+        self._embed_name: str | None = None
         # 生成が同時に2本走らないようにする（下の _stream_with_transformers 参照）
         self._generating = threading.Lock()
 
@@ -883,6 +951,55 @@ class Ai:
         async for chunk in self._stream_with_transformers(prompt, max_tokens):
             yield chunk
 
+    async def embed(self, texts: object, model: str | None = None):
+        """文を、意味を表す数のならび（ベクトル）にする。
+
+        >>> await ai.embed("怖い本")                    # list[float]（384 個）
+        >>> await ai.embed(["怖い本", "料理の本"])        # list[list[float]]
+
+        ``texts`` が文字列なら1本ぶん、リストなら同じ順で返す。
+        **L2 正規化済み**なので、近さは内積で測れる（＝コサイン類似度）。
+
+        ``ai.load()`` は要らない。埋め込みは生成とは別のモデルで、最初に呼んだ
+        ときに読み込まれる（PyHiroba では本体が確認を出す）。
+
+        件数が多いときは自動で分けて渡すので、上限を気にしなくてよい。
+        """
+        one = isinstance(texts, str)
+        items = [texts] if one else [str(text) for text in texts]
+        name = resolve_embed(model)
+        if not items:
+            return []
+        vectors = await self._embed_all(items, name)
+        return vectors[0] if one else vectors
+
+    async def search(self, query: object, documents, top_k: int | None = None):
+        """``query`` に意味が近いものを ``documents`` から探して、近い順に返す。
+
+        >>> hits = await ai.search("怖い本を教えて", [b["desc"] for b in books], top_k=3)
+        >>> for hit in hits:
+        ...     print(books[hit["index"]]["title"], round(hit["score"], 3))
+
+        返すのは ``{"index", "score", "text"}`` の並び（``score`` の大きい順）。
+        ``score`` は −1〜1 で、1 に近いほど意味が近い。
+        """
+        docs = [str(document) for document in documents]
+        if top_k is not None and (isinstance(top_k, bool) or not isinstance(top_k, int)):
+            raise ValueError(f"top_k には整数を指定してください（指定値: {top_k!r}）")
+        if top_k is not None and top_k < 1:
+            raise ValueError(f"top_k には 1 以上を指定してください（指定値: {top_k!r}）")
+        if not docs:
+            return []
+        # 質問と文書をまとめて1回で渡す。別々に呼ぶと往復が2回になる
+        vectors = await self.embed([str(query), *docs])
+        asked, rest = vectors[0], vectors[1:]
+        found = [
+            {"index": i, "score": dot(asked, vector), "text": docs[i]}
+            for i, vector in enumerate(rest)
+        ]
+        found.sort(key=lambda hit: hit["score"], reverse=True)
+        return found if top_k is None else found[:top_k]
+
     # --- ブラウザ経路（PyHiroba 本体との契約） -----------------------------
     #
     # 本体のワーカーが js.pyhirobaAsk(kind, argsJson) -> Promise<resultJson> を用意する。
@@ -898,7 +1015,12 @@ class Ai:
 
         import js
 
-        raw = await js.pyhirobaAsk(kind, args_json)
+        # 本体が断ったとき（Promise の reject）は、理由が日本語で入っている。
+        # 包まずに通すと JsException のまま出て、何が起きたのか読み取れない
+        try:
+            raw = await js.pyhirobaAsk(kind, args_json)
+        except Exception as error:  # 伝わり方は本体・Pyodide 次第
+            raise RuntimeError(f"PyHiroba 本体が {kind} を断りました: {error}") from error
         # 本体が壊れた応答を返したときに、JSONDecodeError や
         # 「'list' object has no attribute 'get'」のような、利用者には意味の
         # 分からない例外で止まらないようにする。原因の見当がつく文言にする。
@@ -1000,6 +1122,81 @@ class Ai:
             chunk = thinking.feed(part.get("text", ""))
             if chunk:
                 yield chunk
+
+    # --- 埋め込みの中身（経路ごと） ----------------------------------------
+
+    async def _embed_all(self, items: list[str], name: str) -> list[list[float]]:
+        """本体の上限に合わせて分けて渡し、つなげて返す。
+
+        本体は 257 件以上を断る。素通しすると、同じコードが PyHiroba では
+        失敗して Colab では通る、という「同じコードが両方で動く」の反例になる。
+        """
+        vectors: list[list[float]] = []
+        for start in range(0, len(items), EMBED_BATCH):
+            chunk = items[start : start + EMBED_BATCH]
+            if in_browser():
+                vectors.extend(await self._embed_in_browser(chunk, name))
+            else:
+                vectors.extend(self._embed_with_transformers(chunk, name))
+        return vectors
+
+    async def _embed_in_browser(self, texts: list[str], name: str) -> list[list[float]]:
+        import json
+
+        if not host_supports("ai-embed"):
+            raise RuntimeError(
+                "お使いの PyHiroba は、まだ文のベクトル化に対応していません。"
+                "本体が新しくなると使えるようになります。"
+            )
+        result = await self._call_host(
+            "ai-embed", json.dumps({"model": name, "texts": texts})
+        )
+        vectors = result.get("vectors")
+        if not isinstance(vectors, list) or len(vectors) != len(texts):
+            raise RuntimeError(
+                f"PyHiroba 本体が返したベクトルの数が合いません"
+                f"（{len(texts)} 文に対して {len(vectors) if isinstance(vectors, list) else '?'} 本）。"
+            )
+        vectors = [[float(value) for value in vector] for vector in vectors]
+        # 1本だけ検算する。正規化されていないと近い順が静かに狂うため
+        check_normalized(vectors[0] if vectors else None)
+        return vectors
+
+    def _embed_with_transformers(self, texts: list[str], name: str) -> list[list[float]]:
+        """平均プーリング＋L2 正規化を自前で行う。
+
+        ``sentence-transformers`` は使わない。あれは transformers>=5 を要求し、
+        scikit-learn と scipy まで連れてくるが、ここでやることは十数行で済む。
+        本体と同じ処理を自分で書くぶん、両経路の一致も保証しやすい。
+        """
+        import torch
+
+        tokenizer, model = self._load_embedder(name)
+        batch = tokenizer(texts, padding=True, truncation=True, return_tensors="pt")
+        with torch.no_grad():
+            output = model(**batch)
+        # 埋め込みは「文全体の平均」。padding の分を平均に混ぜないよう mask で消す
+        mask = batch["attention_mask"].unsqueeze(-1).to(output.last_hidden_state.dtype)
+        pooled = (output.last_hidden_state * mask).sum(1) / mask.sum(1).clamp(min=1e-9)
+        return torch.nn.functional.normalize(pooled, p=2, dim=1).tolist()
+
+    def _load_embedder(self, name: str):
+        """埋め込み用のモデルを読む（1回だけ）。生成用の _pipe とは別物。"""
+        if self._embed_name == name and self._embedder is not None:
+            return self._embedder
+        try:
+            from transformers import AutoModel, AutoTokenizer
+        except ImportError as error:
+            raise ImportError(
+                "transformers と torch が必要です。次の行を先に実行してください:\n"
+                '    !pip install -q -U "library-hiroba[ai]"'
+            ) from error
+        repo = EMBED_MODELS[name]["colab_id"]
+        model = AutoModel.from_pretrained(repo)
+        model.eval()
+        self._embedder = (AutoTokenizer.from_pretrained(repo), model)
+        self._embed_name = name
+        return self._embedder
 
     # --- Colab 経路（transformers + torch） --------------------------------
 

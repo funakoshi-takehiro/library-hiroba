@@ -19,7 +19,7 @@ NOTEBOOKS = sorted((Path(__file__).resolve().parents[1] / "notebooks").glob("*.i
 
 # ai を使うノートブックは、動かすとモデル（数百 MB〜）の取得が始まるため実行しない。
 # 実際に load → ask を通して確かめる手順は tools/check_ai_colab.py にある。
-NOT_RUN = {"demo_ai.ipynb", "chat.ipynb"}
+NOT_RUN = {"demo_ai.ipynb", "chat.ipynb", "book_search.ipynb"}
 
 
 def code_cells(path: Path) -> list[tuple[str, str]]:
