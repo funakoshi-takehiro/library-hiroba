@@ -1605,6 +1605,8 @@ def test_embed_sends_the_agreed_shape(fresh_ai, monkeypatch):
 def test_a_host_that_returns_unnormalized_vectors_is_caught(fresh_ai, monkeypatch):
     """正規化されていないと内積がコサインにならず、近い順が静かに狂う（E2）。"""
 
+    monkeypatch.setitem(_ai.EMBED_MODELS["minilm"], "dim", 2)  # 長さは正しい状態にする
+
     async def ask(kind, args_json):
         texts = json.loads(args_json)["texts"]
         return json.dumps({"vectors": [[3.0, 4.0] for _ in texts], "dim": 2})
@@ -1757,5 +1759,144 @@ def test_a_change_of_model_upstream_is_caught(fresh_ai, monkeypatch):
     js.pyhirobaAsk = ask
     js.pyhirobaFeatures = "ai-embed"
     monkeypatch.setitem(sys.modules, "js", js)
-    with pytest.raises(RuntimeError, match="ベクトルの長さが変わっています"):
+    with pytest.raises(RuntimeError, match="本目のベクトルの長さ"):
         run(fresh_ai.embed("やあ"))
+
+
+# --- 監査で見つかった「黙って間違う」書き方 -----------------------------------
+
+
+def test_a_string_of_documents_is_refused_not_split(fresh_ai, monkeypatch):
+    """文字列を渡すと1文字ずつ別の文になる。例外にならないのが危ない（E6）。"""
+    fake_embed_host(monkeypatch)
+    with pytest.raises(ValueError, match="1文字ずつ"):
+        run(fresh_ai.search("怖い本", "あいうえお"))
+    # embed(str) は「1文だけ」の正規の書き方なので、こちらは通す
+    assert isinstance(run(fresh_ai.embed("あいう"))[0], float)
+
+
+def test_a_dict_of_documents_is_refused_not_keyed(fresh_ai, monkeypatch):
+    """辞書を渡すとキーだけが使われ、説明文が消える（E6）。
+
+    蔵書検索でいちばん起きやすい書き間違い。
+    """
+    fake_embed_host(monkeypatch)
+    with pytest.raises(ValueError, match="キーだけが使われて"):
+        run(fresh_ai.search("怖い本", {"真夜中の校舎": "深夜の学校に…"}))
+    with pytest.raises(ValueError, match="キーだけが使われて"):
+        run(fresh_ai.embed({"題名": "説明"}))
+
+
+def test_something_that_is_not_a_list_says_so(fresh_ai, monkeypatch):
+    """'int' object is not iterable では、何が悪いのか分からない（E6）。"""
+    fake_embed_host(monkeypatch)
+    for bad in (123, None, 1.5):
+        with pytest.raises(ValueError, match="文のリストを渡してください"):
+            run(fresh_ai.embed(bad))
+
+
+def test_too_many_texts_are_refused_before_the_browser_freezes(fresh_ai, monkeypatch):
+    """際限なく受けると、ブラウザが何分も固まったまま落ちる（E6）。"""
+    fake_embed_host(monkeypatch)
+    with pytest.raises(ValueError, match="10000 件まで"):
+        run(fresh_ai.embed([f"x{i}" for i in range(_ai.EMBED_LIMIT + 1)]))
+
+
+def test_vectors_of_different_lengths_are_all_checked(fresh_ai, monkeypatch):
+    """1本目だけ見ていると、途中から混じった別物を素通しする（E6）。
+
+    dot() が zip で切りそろえるため、そのままだと近い順だけが静かに狂う。
+    """
+    monkeypatch.setitem(_ai.EMBED_MODELS["minilm"], "dim", 3)
+
+    async def ask(kind, args_json):
+        # 1本目は正しく、2本目だけ長さが違う
+        return json.dumps({"vectors": [[1.0, 0.0, 0.0], [1.0, 0.0]], "dim": 3})
+
+    js = types.ModuleType("js")
+    js.pyhirobaAsk = ask
+    js.pyhirobaFeatures = "ai-embed"
+    monkeypatch.setitem(sys.modules, "js", js)
+    with pytest.raises(RuntimeError, match="2本目のベクトルの長さ"):
+        run(fresh_ai.embed(["あ", "い"]))
+
+
+def test_comparing_different_lengths_is_refused():
+    """zip は黙って短いほうに切る。近さだけが静かに狂うので止める（E6）。"""
+    assert _ai.dot([1.0, 0.0], [1.0, 0.0]) == 1.0
+    with pytest.raises(ValueError, match="長さの違うベクトル"):
+        _ai.dot([1.0, 0.0, 0.0], [1.0, 0.0])
+
+
+def test_a_broken_vector_says_it_is_the_host(fresh_ai, monkeypatch):
+    """'could not convert string to float' では本体の不具合と分からない（E6）。"""
+    for broken in ([["文字列"]], [[None, None]], [42]):
+
+        async def ask(kind, args_json, broken=broken):
+            return json.dumps({"vectors": broken, "dim": 384})
+
+        js = types.ModuleType("js")
+        js.pyhirobaAsk = ask
+        js.pyhirobaFeatures = "ai-embed"
+        monkeypatch.setitem(sys.modules, "js", js)
+        with pytest.raises(RuntimeError, match="数でないものが混じっています"):
+            run(fresh_ai.embed("やあ"))
+
+
+def test_the_embedder_loads_once_even_from_two_threads(fresh_ai, monkeypatch):
+    """フォームの別スレッドとセルがかち合っても、二重に読まない（E6）。"""
+    pytest.importorskip("torch")
+    built = []
+    ready = threading.Barrier(2)
+
+    def slow_load(repo):
+        ready.wait(timeout=5)  # 2つを確実に同時にぶつける
+        built.append(repo)
+        return types.SimpleNamespace(eval=lambda: None)
+
+    fake = types.ModuleType("transformers")
+    fake.AutoModel = types.SimpleNamespace(from_pretrained=slow_load)
+    fake.AutoTokenizer = types.SimpleNamespace(from_pretrained=lambda repo: object())
+    monkeypatch.setitem(sys.modules, "transformers", fake)
+
+    # 鍵が無いと両方が読み込みに入り、Barrier が揃って built が 2 件になる。
+    # 鍵があると片方が待つので Barrier は揃わず、timeout で BrokenBarrier になる
+    workers = [threading.Thread(target=lambda: _try(fresh_ai)) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=10)
+    assert len(built) <= 1, f"モデルを {len(built)} 回読んでいます（鍵が効いていない）"
+
+
+def _try(ai_object):
+    try:
+        ai_object._load_embedder("minilm")
+    except Exception:  # noqa: BLE001 — Barrier の timeout は想定内
+        pass
+
+
+def test_embedding_does_not_wait_for_a_running_generation(fresh_ai, monkeypatch):
+    """生成中でも embed の読み込みは待たされないこと（E6）。
+
+    鍵を共用にすると、生成が終わるまで _load_embedder が返らない。embed() は
+    イベントループの上から呼ばれるので、そこで止まるとノートブックごと固まる。
+    **実際に生成中の状態を作って、読み込みが返ってくるかで確かめる。**
+    """
+    fake = types.ModuleType("transformers")
+    fake.AutoModel = types.SimpleNamespace(
+        from_pretrained=lambda repo: types.SimpleNamespace(eval=lambda: None)
+    )
+    fake.AutoTokenizer = types.SimpleNamespace(from_pretrained=lambda repo: object())
+    monkeypatch.setitem(sys.modules, "transformers", fake)
+
+    fresh_ai._generating.acquire()  # 生成が走っている状態にする
+    try:
+        done = threading.Event()
+        worker = threading.Thread(
+            target=lambda: (fresh_ai._load_embedder("minilm"), done.set()), daemon=True
+        )
+        worker.start()
+        assert done.wait(timeout=3), "生成の鍵に引きずられて、読み込みが返ってきません"
+    finally:
+        fresh_ai._generating.release()
