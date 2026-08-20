@@ -1494,7 +1494,12 @@ def test_waiting_shows_how_long_it_has_been():
 
 
 def fake_embed_host(monkeypatch, dim=4, features="forms,ai,ai-probe,ai-embed"):
-    """本体の ai-embed の代役。渡された texts を記録し、正規化済みを返す。"""
+    """本体の ai-embed の代役。渡された texts を記録し、正規化済みを返す。
+
+    次元は本物（384）だとテストが重くなるので小さくし、宣言側も揃えておく
+    （揃えないと、こちらが入れた「次元が変わったら止める」検査に引っかかる）。
+    """
+    monkeypatch.setitem(_ai.EMBED_MODELS["minilm"], "dim", dim)
     sent = []
 
     def unit(seed, size):
@@ -1738,3 +1743,19 @@ def test_the_embedder_is_loaded_once_and_is_not_the_chat_model(fresh_ai, monkeyp
     # 生成側は手つかず＝ai.load() と互いに影響しない
     assert fresh_ai._pipe is None and fresh_ai._name is None
     assert not fresh_ai.is_loaded()
+
+
+def test_a_change_of_model_upstream_is_caught(fresh_ai, monkeypatch):
+    """本体は配布元を版で固定していない。差し替わると黙って別物が返る（E5）。"""
+
+    async def ask(kind, args_json):
+        texts = json.loads(args_json)["texts"]
+        # 384 のはずが 3 次元＝別のモデルに差し替わった状態
+        return json.dumps({"vectors": [[0.6, 0.8, 0.0] for _ in texts], "dim": 3})
+
+    js = types.ModuleType("js")
+    js.pyhirobaAsk = ask
+    js.pyhirobaFeatures = "ai-embed"
+    monkeypatch.setitem(sys.modules, "js", js)
+    with pytest.raises(RuntimeError, match="ベクトルの長さが変わっています"):
+        run(fresh_ai.embed("やあ"))

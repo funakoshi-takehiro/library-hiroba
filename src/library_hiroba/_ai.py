@@ -1160,6 +1160,15 @@ class Ai:
         vectors = [[float(value) for value in vector] for vector in vectors]
         # 1本だけ検算する。正規化されていないと近い順が静かに狂うため
         check_normalized(vectors[0] if vectors else None)
+        # 長さ（次元）も見る。本体は配布元を版で固定しておらず、上流でモデルが
+        # 差し替わると**黙って別のベクトル**が返る。教材を作った先生から見ると
+        # 「前と結果が違う」だけで、原因にたどり着けない
+        expected = EMBED_MODELS[name]["dim"]
+        if vectors and len(vectors[0]) != expected:
+            raise RuntimeError(
+                f"ベクトルの長さが変わっています（{expected} のはずが {len(vectors[0])}）。"
+                "配布元のモデルが差し替わった可能性があります。"
+            )
         return vectors
 
     def _embed_with_transformers(self, texts: list[str], name: str) -> list[list[float]]:
