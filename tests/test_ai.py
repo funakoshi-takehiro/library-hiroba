@@ -10,12 +10,14 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import re
 import sys
 import threading
 import time
 import types
 
 import pytest
+from conftest import require_torch
 from sanitize_check import check_html
 
 import library_hiroba
@@ -24,6 +26,20 @@ from library_hiroba import _ai
 
 def run(coro):
     return asyncio.run(coro)
+
+
+def pinned(make):
+    """``from_pretrained`` の代役。``revision`` を渡されなければ落ちる。
+
+    ここを ``lambda repo, revision=None`` のように省略できる形で書くと、本体から
+    ``revision=`` を外しても代役が黙って受け取ってしまい、**版の固定が消えたことに
+    どのテストも気付かない**。キーワード必須にして、外したら落ちるようにしておく。
+    """
+
+    def from_pretrained(repo, *, revision):
+        return make(repo, revision)
+
+    return from_pretrained
 
 
 @pytest.fixture
@@ -490,6 +506,28 @@ def test_colab_load_uses_the_base_model_id(fresh_ai, fake_transformers):
     message = run(fresh_ai.load("qwen05-q8"))  # ブラウザ側の名前で呼ばれても動く
     assert fake_transformers["build"]["model"] == "Qwen/Qwen2.5-0.5B-Instruct"
     assert "準備ができました" in message and "CPU" in message
+
+
+def test_colab_load_pins_the_model_revision(fresh_ai, fake_transformers):
+    """配布元の版を固定して読むこと（S-1）。
+
+    ``revision`` を渡さないと Hugging Face の main を追う。上流が更新された日から
+    生徒の手元には**別の重み**が降ってきて、教材の答えだけが静かに変わる。
+    """
+    run(fresh_ai.load("qwen05"))
+    assert fake_transformers["build"]["revision"] == _ai.MODELS["qwen05"]["colab_revision"]
+
+
+def test_every_model_declares_a_pinned_revision():
+    """一覧に足したモデルも、必ず版が固定されていること（S-1）。
+
+    固定を忘れても普通に動いてしまうため、増やした時点でここが止める。
+    """
+    for name, entry in {**_ai.MODELS, **_ai.EMBED_MODELS}.items():
+        revision = entry.get("colab_revision", "")
+        assert re.fullmatch(r"[0-9a-f]{40}", revision), (
+            f"{name} の colab_revision がコミット（40桁の16進）ではありません: {revision!r}"
+        )
 
 
 def test_colab_generation_parameters_are_unchanged(fresh_ai, fake_transformers):
@@ -1685,7 +1723,7 @@ def test_colab_pooling_ignores_padding_and_normalizes(fresh_ai, monkeypatch):
     短い文には padding が付く。これを平均に混ぜると、文の長さでベクトルが
     変わってしまい、検索の順位が狂う。**混ざっていないこと**を数で見る。
     """
-    torch = pytest.importorskip("torch")
+    torch = require_torch()
 
     # 1文目は2語＋padding、2文目は3語。padding には極端な値を入れてあるので、
     # 混ざっていれば結果が大きくずれる
@@ -1708,8 +1746,8 @@ def test_colab_pooling_ignores_padding_and_normalizes(fresh_ai, monkeypatch):
         return {"input_ids": torch.zeros_like(mask), "attention_mask": mask}
 
     fake = types.ModuleType("transformers")
-    fake.AutoModel = types.SimpleNamespace(from_pretrained=lambda repo: FakeModel())
-    fake.AutoTokenizer = types.SimpleNamespace(from_pretrained=lambda repo: tokenizer)
+    fake.AutoModel = types.SimpleNamespace(from_pretrained=pinned(lambda repo, revision: FakeModel()))
+    fake.AutoTokenizer = types.SimpleNamespace(from_pretrained=pinned(lambda repo, revision: tokenizer))
     monkeypatch.setitem(sys.modules, "transformers", fake)
     monkeypatch.delitem(sys.modules, "js", raising=False)
 
@@ -1725,7 +1763,7 @@ def test_colab_pooling_ignores_padding_and_normalizes(fresh_ai, monkeypatch):
 
 def test_the_embedder_is_loaded_once_and_is_not_the_chat_model(fresh_ai, monkeypatch):
     """埋め込みは生成とは別のモデル。load() の状態と混ざらないこと（E4）。"""
-    pytest.importorskip("torch")
+    require_torch()
     built = []
 
     class FakeModel:
@@ -1734,14 +1772,15 @@ def test_the_embedder_is_loaded_once_and_is_not_the_chat_model(fresh_ai, monkeyp
 
     fake = types.ModuleType("transformers")
     fake.AutoModel = types.SimpleNamespace(
-        from_pretrained=lambda repo: built.append(repo) or FakeModel()
+        from_pretrained=pinned(lambda repo, revision: built.append((repo, revision)) or FakeModel())
     )
-    fake.AutoTokenizer = types.SimpleNamespace(from_pretrained=lambda repo: object())
+    fake.AutoTokenizer = types.SimpleNamespace(from_pretrained=pinned(lambda repo, revision: object()))
     monkeypatch.setitem(sys.modules, "transformers", fake)
 
     fresh_ai._load_embedder("minilm")
     fresh_ai._load_embedder("minilm")
-    assert built == [_ai.EMBED_MODELS["minilm"]["colab_id"]], "2回目は読み直さない"
+    entry = _ai.EMBED_MODELS["minilm"]
+    assert built == [(entry["colab_id"], entry["colab_revision"])], "2回目は読み直さない"
     # 生成側は手つかず＝ai.load() と互いに影響しない
     assert fresh_ai._pipe is None and fresh_ai._name is None
     assert not fresh_ai.is_loaded()
@@ -1845,18 +1884,18 @@ def test_a_broken_vector_says_it_is_the_host(fresh_ai, monkeypatch):
 
 def test_the_embedder_loads_once_even_from_two_threads(fresh_ai, monkeypatch):
     """フォームの別スレッドとセルがかち合っても、二重に読まない（E6）。"""
-    pytest.importorskip("torch")
+    require_torch()
     built = []
     ready = threading.Barrier(2)
 
-    def slow_load(repo):
+    def slow_load(repo, *, revision):
         ready.wait(timeout=5)  # 2つを確実に同時にぶつける
         built.append(repo)
         return types.SimpleNamespace(eval=lambda: None)
 
     fake = types.ModuleType("transformers")
     fake.AutoModel = types.SimpleNamespace(from_pretrained=slow_load)
-    fake.AutoTokenizer = types.SimpleNamespace(from_pretrained=lambda repo: object())
+    fake.AutoTokenizer = types.SimpleNamespace(from_pretrained=pinned(lambda repo, revision: object()))
     monkeypatch.setitem(sys.modules, "transformers", fake)
 
     # 鍵が無いと両方が読み込みに入り、Barrier が揃って built が 2 件になる。
@@ -1885,9 +1924,9 @@ def test_embedding_does_not_wait_for_a_running_generation(fresh_ai, monkeypatch)
     """
     fake = types.ModuleType("transformers")
     fake.AutoModel = types.SimpleNamespace(
-        from_pretrained=lambda repo: types.SimpleNamespace(eval=lambda: None)
+        from_pretrained=pinned(lambda repo, revision: types.SimpleNamespace(eval=lambda: None))
     )
-    fake.AutoTokenizer = types.SimpleNamespace(from_pretrained=lambda repo: object())
+    fake.AutoTokenizer = types.SimpleNamespace(from_pretrained=pinned(lambda repo, revision: object()))
     monkeypatch.setitem(sys.modules, "transformers", fake)
 
     fresh_ai._generating.acquire()  # 生成が走っている状態にする

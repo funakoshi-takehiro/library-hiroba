@@ -195,6 +195,14 @@ return JSON.stringify({
 
 **4つそろって初めて追加できます。** そろわないものを入れると「同じコードが両方で動く」が崩れます。
 
+そろったら、`MODELS` に `colab_revision` も書いてください（0.6.2 から必須。テストが止めます）。書かないと Hugging Face の `main` を追い、上流が更新された日から生徒の手元に**別の重み**が降ります。学校では「去年と同じ教材なのに答えが変わった」という形でしか現れないため、原因にたどり着けません。
+
+```bash
+curl -s https://huggingface.co/api/models/<colab_id> | python -c "import json,sys; print(json.load(sys.stdin)['sha'])"
+```
+
+**`browser_repo` を差し替えられる際はお知らせください。** こちらの `colab_id` / `colab_revision` と揃えないと、同じ名前で環境ごとに別のモデルが動きます。
+
 ONNX 版が無いモデルをどうしても使いたい場合は、自分で変換して配布する必要があります。
 
 ```bash

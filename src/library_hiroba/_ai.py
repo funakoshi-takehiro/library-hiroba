@@ -50,6 +50,14 @@ __all__ = ["Ai", "ai"]
 # ブラウザは ONNX に変換されたものしか読めないので、選べる幅はそちらで決まる。
 # 増やせるかどうかの調べ方は docs/PYHIROBA_INTEGRATION.md の「モデルを増やす」に。
 #
+# ``colab_revision`` は Hugging Face 側のコミットを固定する。書かずに
+# ``from_pretrained(repo)`` と呼ぶと、配布元の main が動いた瞬間から**別の重みが
+# 降ってくる**。学校では「去年と同じ教材なのに答えが変わった」という形で現れ、
+# 原因にたどり着けない。ブラウザ側は本体が版を固定していないため（先方の記録済みの
+# 課題）ベクトルの長さで気付く検査を入れてあるが、Colab 側はこちらのコードなので
+# 固定できる。上げるときは colab_id と browser_repo と揃えて上げること。
+#   確かめ方: curl -s https://huggingface.co/api/models/<colab_id> | jq -r .sha
+#
 # ``rank`` と ``needs`` は ``recommend()`` が使う（下の「おすすめを選ぶ」参照）。
 #   rank  … 答えの質の順。大きいほど良い。重なりが無いこと（テストで固定）
 #   needs … その環境で実用になる最低条件。approx_mb から機械的に出さず手で書く。
@@ -60,6 +68,7 @@ MODELS = {
     "qwen05": {
         "label": "Qwen2.5 0.5B（日本語が使えます・おすすめ）",
         "colab_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "colab_revision": "7ae557604adf67be50417f59c2c2f167def9a775",
         "browser_repo": "onnx-community/Qwen2.5-0.5B-Instruct",
         "browser_key": "qwen05-q8",
         "browser_variants": ("qwen05-q8", "qwen05-q4"),
@@ -73,6 +82,7 @@ MODELS = {
     "qwen15": {
         "label": "Qwen2.5 1.5B（日本語がより自然・重い）",
         "colab_id": "Qwen/Qwen2.5-1.5B-Instruct",
+        "colab_revision": "989aa7980e4cf806f80c7fef2b1adb7bc71aa306",
         "browser_repo": "onnx-community/Qwen2.5-1.5B-Instruct",
         "browser_key": "qwen15-q4",
         "browser_variants": ("qwen15-q4",),
@@ -87,6 +97,7 @@ MODELS = {
     "qwen3_06": {
         "label": "Qwen3 0.6B（Qwen2.5 0.5B より新しい・日本語が少し良い）",
         "colab_id": "Qwen/Qwen3-0.6B",
+        "colab_revision": "c1899de289a04d12100db370d81485cdf75e47ca",
         "browser_repo": "onnx-community/Qwen3-0.6B-ONNX",
         # 既定は q4 ではなく q8。このモデルでは 8bit のほうが**小さく、しかも精度が
         # 高い**（PyHiroba 側の実測で q4 877MB / q8 589MB）。逆に見えるが、q4 は
@@ -109,6 +120,7 @@ MODELS = {
     "qwen3_17": {
         "label": "Qwen3 1.7B（この一覧でいちばん賢い・重い）",
         "colab_id": "Qwen/Qwen3-1.7B",
+        "colab_revision": "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e",
         "browser_repo": "onnx-community/Qwen3-1.7B-ONNX",
         "browser_key": "qwen3_17-q4",
         "browser_variants": ("qwen3_17-q4",),
@@ -126,6 +138,7 @@ MODELS = {
         # 150M では両者の差はほとんどなく、揃えるほうを採った。
         "label": "LLM-jp-3 150M（国産・とても軽い／文章は不自然です）",
         "colab_id": "llm-jp/llm-jp-3-150m-instruct2",
+        "colab_revision": "a1c034443bb2c760d5dd643e54abb2c8831cd052",
         "browser_repo": "onnx-community/llm-jp-3-150m-instruct2-ONNX",
         "browser_key": "llmjp150m-q4",
         "browser_variants": ("llmjp150m-q4",),
@@ -166,6 +179,7 @@ EMBED_MODELS = {
     "minilm": {
         "label": "多言語 MiniLM（文の意味をベクトルにする）",
         "colab_id": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        "colab_revision": "e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
         "browser_repo": "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
         "approx_mb": {"browser": 118, "colab": 480},
         "dim": 384,
@@ -1261,9 +1275,10 @@ class Ai:
                 '    !pip install -q -U "library-hiroba[ai]"'
             ) from error
         repo = EMBED_MODELS[name]["colab_id"]
-        model = AutoModel.from_pretrained(repo)
+        revision = EMBED_MODELS[name]["colab_revision"]
+        model = AutoModel.from_pretrained(repo, revision=revision)
         model.eval()
-        self._embedder = (AutoTokenizer.from_pretrained(repo), model)
+        self._embedder = (AutoTokenizer.from_pretrained(repo, revision=revision), model)
         self._embed_name = name
         return self._embedder
 
@@ -1286,6 +1301,7 @@ class Ai:
         self._pipe = pipeline(
             "text-generation",
             model=MODELS[base]["colab_id"],
+            revision=MODELS[base]["colab_revision"],
             device=device,
             **{_dtype_keyword(pipeline): torch.float16 if device == 0 else torch.float32},
         )
