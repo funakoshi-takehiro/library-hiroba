@@ -589,3 +589,71 @@ def test_the_font_can_be_turned_on_for_colab():
         assert "fonts.googleapis.com" in _ui.card("a")._repr_html_()
     finally:
         _ui.use_web_font(False)
+
+
+# --- 監査で見つかった「黙って間違う」書き方 ---------------------------------
+
+
+@pytest.mark.parametrize("factory", ["columns", "stack", "show"])
+def test_a_list_of_parts_is_read_as_the_parts(factory):
+    """``ui.columns([a, b])`` が部品2つとして読まれること（B-1）。
+
+    ``ui.chat()`` と ``ui.table()`` はリストを受け取るので、こう書くのは自然な
+    間違い。以前は可変長引数にリスト1個として届き、例外にもならずに画面へ
+    ``[<library_hiroba.Card>, <library_hiroba.Card>]`` という文字が出ていた。
+    """
+    widget = getattr(ui, factory)([ui.card("あ"), ui.card("い")])
+    html = widget._repr_html_()
+    assert "library_hiroba.Card" not in html, "リストの文字列表現が画面に出ています"
+    assert "あ" in html and "い" in html
+
+
+@pytest.mark.parametrize("factory", ["columns", "stack"])
+def test_the_old_way_of_writing_still_works(factory):
+    """可変長引数で並べる従来の書き方は変わらないこと（B-1）。"""
+    html = getattr(ui, factory)(ui.card("あ"), ui.card("い"))._repr_html_()
+    assert "あ" in html and "い" in html
+
+
+def test_widths_are_matched_against_the_list_contents():
+    """リストで渡したときも、widths の数はその中身と照合されること（B-1）。"""
+    with pytest.raises(ValueError, match="部品の数（2）"):
+        ui.columns([ui.card("あ"), ui.card("い")], widths=[1])
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_progress_refuses_values_that_are_not_real_numbers(bad):
+    """NaN と無限大を止めること（B-4）。
+
+    ``min``/``max`` は NaN との比較がすべて False になるため、素通りさせると
+    **0% という、もっともらしい嘘**が画面に出る。平均のもとが空だった、と
+    いった計算の誤りがそこで隠れる。
+    """
+    with pytest.raises(ValueError):
+        ui.progress(bad, 10)
+    with pytest.raises(ValueError):
+        ui.progress(1, bad)
+
+
+@pytest.mark.parametrize(
+    ("call", "argument"),
+    [
+        (lambda: ui.progress("abc", 10), "value"),
+        (lambda: ui.progress(1, "abc"), "max"),
+        (lambda: ui.columns(ui.card("あ"), widths=["x"]), "widths"),
+    ],
+)
+def test_a_bad_number_says_which_argument_it_was(call, argument):
+    """数でない値を渡したとき、どの引数の話か分かること（B-3）。
+
+    素の ``could not convert string to float: 'abc'`` では、部品を並べたセルの
+    どこが悪いのか分からない。
+    """
+    with pytest.raises(ValueError, match=argument):
+        call()
+
+
+def test_ordinary_numbers_are_untouched():
+    """直したことで、普通の値の見え方が変わっていないこと（B-3, B-4）。"""
+    assert 'aria-valuenow="70"' in ui.progress(7, 10)._repr_html_()
+    assert "flex: 2 1 0" in ui.columns(ui.card("あ"), ui.card("い"), widths=[2, 1])._repr_html_()

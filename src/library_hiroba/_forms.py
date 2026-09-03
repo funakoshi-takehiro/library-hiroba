@@ -20,7 +20,7 @@ import keyword
 from collections.abc import Sequence
 from typing import Callable, Union
 
-from ._core import Widget, esc, esc_attr, unique_name
+from ._core import Widget, as_number, esc, esc_attr, unique_name
 from ._css import COMPONENT_CSS, base_css
 
 
@@ -141,6 +141,11 @@ class Field:
             raise ValueError(f"kind は {list(self.KINDS)} のいずれかにしてください（指定値: {kind!r}）")
         if kind == "choice" and not choices:
             raise ValueError("kind='choice' のときは choices を指定してください")
+        # 数の欄に数でない既定値を書くと、PyHiroba では空欄になって動き、Colab では
+        # ipywidgets の FloatText が表示の瞬間に落ちる。**環境で挙動が割れる**うえ、
+        # traceback は ui.field() を書いた行ではなく表示の行を指す。ここで止める
+        if kind == "number" and str(default) != "":
+            as_number(default, "default")
         self.name = name
         self.label = name if label is None else label
         self.placeholder = placeholder

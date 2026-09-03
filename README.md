@@ -11,11 +11,11 @@ Google Colab と PyHiroba で、同じコードが同じように動く教育向
 
 | ノートブック | 内容 | |
 |---|---|---|
-| [`chat.ipynb`](notebooks/chat.ipynb) | AI とチャットする（`ai.talk()`／`ui.conversation()`） | [![Colab で開く](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/funakoshi-takehiro/library-hiroba/blob/main/notebooks/chat.ipynb) |
-| [`book_search.ipynb`](notebooks/book_search.ipynb) | 意味で探す蔵書検索（`ai.search()`） | [![Colab で開く](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/funakoshi-takehiro/library-hiroba/blob/main/notebooks/book_search.ipynb) |
-| [`demo_ai.ipynb`](notebooks/demo_ai.ipynb) | `ai` のひととおり（モデル選び・逐次出力） | [![Colab で開く](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/funakoshi-takehiro/library-hiroba/blob/main/notebooks/demo_ai.ipynb) |
-| [`demo_colab.ipynb`](notebooks/demo_colab.ipynb) | `ui` の部品を並べて見る | [![Colab で開く](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/funakoshi-takehiro/library-hiroba/blob/main/notebooks/demo_colab.ipynb) |
-| [`html_css_recipes.ipynb`](notebooks/html_css_recipes.ipynb) | `ui.html()` で作る見た目の作例 | [![Colab で開く](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/funakoshi-takehiro/library-hiroba/blob/main/notebooks/html_css_recipes.ipynb) |
+| [`chat.ipynb`](notebooks/chat.ipynb) | AI とチャットする（`ai.talk()`／`ui.conversation()`） | [![Colab で開く](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/funakoshi-takehiro/ui-hiroba/blob/main/notebooks/chat.ipynb) |
+| [`book_search.ipynb`](notebooks/book_search.ipynb) | 意味で探す蔵書検索（`ai.search()`） | [![Colab で開く](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/funakoshi-takehiro/ui-hiroba/blob/main/notebooks/book_search.ipynb) |
+| [`demo_ai.ipynb`](notebooks/demo_ai.ipynb) | `ai` のひととおり（モデル選び・逐次出力） | [![Colab で開く](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/funakoshi-takehiro/ui-hiroba/blob/main/notebooks/demo_ai.ipynb) |
+| [`demo_colab.ipynb`](notebooks/demo_colab.ipynb) | `ui` の部品を並べて見る | [![Colab で開く](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/funakoshi-takehiro/ui-hiroba/blob/main/notebooks/demo_colab.ipynb) |
+| [`html_css_recipes.ipynb`](notebooks/html_css_recipes.ipynb) | `ui.html()` で作る見た目の作例 | [![Colab で開く](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/funakoshi-takehiro/ui-hiroba/blob/main/notebooks/html_css_recipes.ipynb) |
 
 `ai` を使うノートブックは、初回にモデルの取得（数百 MB〜）が入ります。
 
@@ -90,6 +90,9 @@ CSS が届く範囲はそのコンポーネントの内側に限られるため�
 ```python
 ui.stack(ui.card("目標", "..."), ui.progress(3, max=10))   # 縦に積む
 ui.columns(ui.stat("得点", 90), ui.stat("順位", 3))        # 横に並べる
+
+parts = [ui.stat("得点", 90), ui.stat("順位", 3)]
+ui.columns(parts)                                          # リストで渡してもよい
 ```
 
 セルの途中で表示したい場合は `ui.show(...)` を使います。Google Colab ではその場に表示され、IPython のない PyHiroba ではコンポーネントを返すので、セル最後の式として置きます。
@@ -356,8 +359,8 @@ python tools/build_gallery.py --shots       # 全コンポーネントのギャ�
 python tools/check_ai_colab.py              # ai の Google Colab 経路を実際に動かす（[ai] が必要）
 ```
 
-リリース手順は [`docs/RELEASING.md`](https://github.com/funakoshi-takehiro/library-hiroba/blob/main/docs/RELEASING.md) にあります。
+リリース手順は [`docs/RELEASING.md`](https://github.com/funakoshi-takehiro/ui-hiroba/blob/main/docs/RELEASING.md) にあります。
 
 ## ライセンス
 
-[MIT](https://github.com/funakoshi-takehiro/library-hiroba/blob/main/LICENSE)
+[MIT](https://github.com/funakoshi-takehiro/ui-hiroba/blob/main/LICENSE)

@@ -42,6 +42,31 @@ def css_length(value: object, argument: str) -> str:
     return text
 
 
+def as_number(value: object, argument: str) -> float:
+    """数として受け取る。数でなければ、何を書けばよいかを添えて止める。
+
+    ``float(value)`` を直に呼ぶと ``could not convert string to float: 'abc'`` と
+    いう英語だけが出る。どの引数の話なのかが書いていないので、部品を並べた
+    セルのどこが悪いのか分からない。
+
+    NaN と無限大も止める。``min``/``max`` は NaN との比較がすべて False になる
+    ため、素通りさせると **0% という、もっともらしい嘘**が画面に出る。
+    平均のもとが空だった、といった計算の誤りがそこで隠れてしまう。
+    """
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise ValueError(f"{argument} には数を指定してください（指定値: {value!r}）") from None
+    if number != number:
+        raise ValueError(
+            f"{argument} が NaN（数でない値）です。平均などのもとが空になっていないか"
+            f"確かめてください（指定値: {value!r}）"
+        )
+    if number in (float("inf"), float("-inf")):
+        raise ValueError(f"{argument} が無限大です。割る数が 0 になっていませんか（指定値: {value!r}）")
+    return number
+
+
 def shown(value: object) -> bool:
     """表示すべき値かどうか。
 
@@ -124,6 +149,23 @@ def as_widget(item: Item) -> Widget:
     return item if isinstance(item, Widget) else Text(item)
 
 
+def as_items(items: Sequence[Item]) -> Sequence[Item]:
+    """可変長引数で受けた並びを、部品の並びとして解釈する。
+
+    ``ui.chat()`` と ``ui.table()`` はリストを受け取るので、``ui.columns()`` にも
+    ``[a, b]`` と書くのは自然な間違い。だが可変長引数にはリスト**1個**として届き、
+    そのまま ``Text(str(リスト))`` になって、画面に
+    ``[<library_hiroba.Card>, <library_hiroba.Card>]`` という文字が出る。
+    例外にならないので、気付くのは授業で映したときになる。
+
+    リストかタプルが1つだけ来たら、その中身を並びとして扱う。いまその書き方で
+    出ていたのは壊れた表示だけなので、動いていたものは何も変わらない。
+    """
+    if len(items) == 1 and isinstance(items[0], (list, tuple)):
+        return list(items[0])
+    return items
+
+
 class Container(Widget):
     """子ウィジェットを持つ部品。CSS は子の分まで再帰的に集約する。"""
 
@@ -166,6 +208,9 @@ def show(*items: Item):
     - PyHiroba（IPython なし）: 部品（複数なら縦積み）を返すので、
       セル最後の式として置けば表示される。
     """
+    if not items:
+        raise ValueError("表示する部品を1つ以上渡してください")
+    items = as_items(items)
     if not items:
         raise ValueError("表示する部品を1つ以上渡してください")
     widget = as_widget(items[0]) if len(items) == 1 else Stack(items)

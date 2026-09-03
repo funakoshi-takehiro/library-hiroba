@@ -16,6 +16,8 @@ from ._core import (
     Item,
     Stack,
     Widget,
+    as_items,
+    as_number,
     css_length,
     esc,
     esc_attr,
@@ -176,10 +178,10 @@ class Progress(Widget):
         label: object = None,
         show_value: bool = True,
     ):
-        max_value = float(max)
+        max_value = as_number(max, "max")
         if max_value <= 0:
             raise ValueError(f"max は正の数にしてください（指定値: {max!r}）")
-        self.value = float(value)
+        self.value = as_number(value, "value")
         self.max = max_value
         self.label = label
         self.show_value = show_value
@@ -244,7 +246,7 @@ class Columns(Container):
     ):
         super().__init__(items)
         if widths is not None:
-            widths = [float(w) for w in widths]
+            widths = [as_number(w, "widths") for w in widths]
             if len(widths) != len(self.children):
                 raise ValueError(
                     f"widths の数（{len(widths)}）を部品の数（{len(self.children)}）に合わせてください"
@@ -563,7 +565,7 @@ def columns(*items, widths=None, gap="12px") -> Columns:
 
     >>> ui.columns(ui.stat("得点", 90), ui.stat("順位", 3))
     """
-    return Columns(items, widths=widths, gap=gap)
+    return Columns(as_items(items), widths=widths, gap=gap)
 
 
 def badge(text, color="blue") -> Badge:
@@ -609,7 +611,7 @@ def stack(*items, gap="12px") -> Stack:
 
     >>> ui.stack(ui.card("目標", "..."), ui.progress(3, max=10))
     """
-    return Stack(items, gap=gap)
+    return Stack(as_items(items), gap=gap)
 
 
 class Thinking(Widget):

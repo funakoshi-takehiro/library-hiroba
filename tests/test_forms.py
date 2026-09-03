@@ -729,3 +729,17 @@ def test_a_failure_while_displaying_is_not_swallowed(fake_ipython, monkeypatch):
     _text_box, button = widgets_of(fake_ipython)
     button.fn(None)  # 例外が外へ抜けないこと
     assert "表示のときに落ちた" in output_html(fake_ipython)
+
+
+def test_a_number_field_refuses_a_default_that_is_not_a_number():
+    """数の欄の既定値は、作った時点で確かめること（B-2）。
+
+    以前は ``ui.field()`` を素通りし、PyHiroba では空欄として動き、Colab では
+    ipywidgets の FloatText が**表示の瞬間に**落ちていた。環境で挙動が割れる
+    うえ、traceback は ``ui.field()`` を書いた行ではなく表示の行を指す。
+    """
+    with pytest.raises(ValueError, match="default"):
+        ui.field("n", kind="number", default="abc")
+    # 空（既定）と数はそのまま通る
+    assert ui.field("n", kind="number").default == ""
+    assert ui.field("n", kind="number", default=5).default == 5
