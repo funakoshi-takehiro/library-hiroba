@@ -8,3 +8,5 @@ build/
 .ruff_cache/
 tools/out/
 .ipynb_checkpoints/
+.coverage
+htmlcov/
