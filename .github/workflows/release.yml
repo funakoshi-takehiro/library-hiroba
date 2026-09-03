@@ -32,10 +32,15 @@ jobs:
             exit 1
           fi
 
-      # 壊れたものを公開しないよう、リリース時にもテストを通す
+      # 壊れたものを公開しないよう、リリース時にもテストを通す。
+      # ai extra まで入れるのは、Colab 経路の検査が torch を要るため。ここを
+      # dev だけにすると、その検査が skip されたまま公開まで進む
       - name: Test
+        env:
+          HIROBA_REQUIRE_AI: "1"
         run: |
-          python -m pip install -e ".[dev]"
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e ".[dev,ai]"
           ruff check src tests tools
           pytest -q
 

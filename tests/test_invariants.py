@@ -7,11 +7,17 @@
 
 from __future__ import annotations
 
+import os
+import re
+from pathlib import Path
+
 import pytest
 from conftest import sample_widgets
 from sanitize_check import check_html
 
 from library_hiroba import ui
+
+ROOT = Path(__file__).resolve().parents[1]
 
 # XSS でよく使われるパターンを text 引数に注入する
 EVIL = '<script>alert(1)</script><img src=x onerror=alert(1)>"><iframe src="javascript:alert(1)"></iframe>'
@@ -124,3 +130,73 @@ def test_no_javascript_anywhere():
         assert "<script" not in rendered
         assert "javascript:" not in rendered
         assert "onclick" not in rendered
+
+
+def test_the_ai_extra_declares_lower_bounds():
+    """``[ai]`` の依存に版の下限があること。
+
+    下限が無いと、古い transformers が入った環境で ``KeyError: 'qwen3'`` のような
+    原因の分からない形で落ちる。一覧に載せたモデルが要求する版を書いておく。
+
+    tomllib は 3.11 からで、この package は 3.9 も対象なので使わない。
+    """
+    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    line = re.search(r"^ai = \[(.*)\]$", text, re.M)
+    assert line, "pyproject.toml に ai extra が見つかりません"
+    for requirement in re.findall(r'"([^"]+)"', line.group(1)):
+        assert ">=" in requirement, f"{requirement} に版の下限がありません"
+
+
+def test_missing_torch_is_a_failure_in_ci_and_a_skip_at_hand():
+    """``require_torch`` が CI では落とし、手元では飛ばすこと（S-2）。
+
+    ここを素の ``pytest.importorskip`` に戻すと、CI の依存から torch が抜けた日に
+    **静かに skip へ戻る**。実際そうなっていて、0.6.1 で直した所の見張り3件は
+    緑のまま一度も動いていなかった。戻したら気付けるように、ここで確かめる。
+    """
+    import sys
+
+    from conftest import require_torch
+
+    saved_module = sys.modules.get("torch")
+    saved_env = os.environ.get("HIROBA_REQUIRE_AI")
+    sys.modules["torch"] = None  # import すると ImportError になる
+    try:
+        os.environ["HIROBA_REQUIRE_AI"] = "1"
+        # pytest.raises(ImportError) では捕まらない。素の importorskip に戻すと
+        # Skipped が投げられ、pytest はこのテスト自体を「飛ばした」と数えて
+        # 緑のままにする。捕まえたい変異が、まさにその形をしている
+        try:
+            require_torch()
+        except ImportError:
+            pass
+        except pytest.skip.Exception:
+            pytest.fail("CI の指定があるのに skip しました（見張りが効いていません）")
+        else:
+            pytest.fail("torch が無いのに、何も起きませんでした")
+
+        os.environ.pop("HIROBA_REQUIRE_AI", None)
+        with pytest.raises(pytest.skip.Exception):
+            require_torch()
+    finally:
+        if saved_module is None:
+            sys.modules.pop("torch", None)
+        else:
+            sys.modules["torch"] = saved_module
+        if saved_env is None:
+            os.environ.pop("HIROBA_REQUIRE_AI", None)
+        else:
+            os.environ["HIROBA_REQUIRE_AI"] = saved_env
+
+
+@pytest.mark.parametrize("workflow", ["ci.yml", "release.yml"])
+def test_the_workflows_actually_install_the_ai_extra(workflow):
+    """CI と公開の両方で、torch を要る検査が実際に動くこと（S-2）。
+
+    ``.[dev]`` だけを入れていたため、Colab 経路の検査は skip されたまま公開まで
+    進んでいた。上の見張りは ``HIROBA_REQUIRE_AI`` が立っていないと働かないので、
+    ワークフロー側の2点（ai extra を入れる・環境変数を立てる）も固定しておく。
+    """
+    text = (ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8")
+    assert '".[dev,ai]"' in text, f"{workflow} が ai extra を入れていません"
+    assert "HIROBA_REQUIRE_AI" in text, f"{workflow} が HIROBA_REQUIRE_AI を立てていません"

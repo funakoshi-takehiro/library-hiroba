@@ -1,13 +1,33 @@
 from __future__ import annotations
 
+import os
 import re
 import sys
 from pathlib import Path
+
+import pytest
 
 # pip install なしでも src レイアウトのパッケージを import できるようにする
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from library_hiroba import ui
+
+
+def require_torch():
+    """torch を要求する。手元では無ければ飛ばし、CI では落とす。
+
+    Colab 経路（平均プーリング・埋め込みの鍵・二重読み込み）の見張りは torch が
+    無いと動かない。``pytest.importorskip`` をそのまま書くと、CI の依存から torch が
+    抜けた日に**静かに skip へ戻り**、緑のまま誰も気付かない。実際そうなっていた。
+
+    そのため CI では ``HIROBA_REQUIRE_AI=1`` を立て、torch が無いこと自体を
+    失敗として扱う。手元では今までどおり飛ばす。
+    """
+    if os.environ.get("HIROBA_REQUIRE_AI") == "1":
+        import torch  # noqa: F401 — 無ければ ImportError をそのまま出す（skip しない）
+
+        return sys.modules["torch"]
+    return pytest.importorskip("torch")
 
 
 def has_rule(html: str, selector: str) -> bool:
