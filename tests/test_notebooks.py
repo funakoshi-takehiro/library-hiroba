@@ -8,18 +8,25 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 from pathlib import Path
 
 import pytest
 from sanitize_check import check_html
 
+import library_hiroba
 from library_hiroba import ui
 
-NOTEBOOKS = sorted((Path(__file__).resolve().parents[1] / "notebooks").glob("*.ipynb"))
+ROOT = Path(__file__).resolve().parents[1]
+# examples/ も配るものなので同じ検査に掛ける。ここを notebooks/ だけにしていたため、
+# school_rules_bot.ipynb は構文検査もサニタイザ検査も受けていなかった
+NOTEBOOKS = sorted(
+    list((ROOT / "notebooks").glob("*.ipynb")) + list((ROOT / "examples").glob("*.ipynb"))
+)
 
 # ai を使うノートブックは、動かすとモデル（数百 MB〜）の取得が始まるため実行しない。
 # 実際に load → ask を通して確かめる手順は tools/check_ai_colab.py にある。
-NOT_RUN = {"demo_ai.ipynb", "chat.ipynb", "book_search.ipynb"}
+NOT_RUN = {"demo_ai.ipynb", "chat.ipynb", "book_search.ipynb", "school_rules_bot.ipynb"}
 
 
 def code_cells(path: Path) -> list[tuple[str, str]]:
@@ -71,3 +78,44 @@ def test_notebook_cells_run_and_render_safely(notebook):
         if isinstance(value, ui.Widget):
             violations = check_html(value._repr_html_())
             assert violations == [], f"{notebook.name}:{cell_id} → {violations}"
+
+
+def raw_code(path: Path) -> str:
+    """マジックコマンドも含めた、コードセルの中身すべて。"""
+    nb = json.loads(path.read_text(encoding="utf-8"))
+    return "\n".join(
+        "".join(cell["source"]) for cell in nb["cells"] if cell["cell_type"] == "code"
+    )
+
+
+@pytest.mark.parametrize("notebook", NOTEBOOKS, ids=lambda p: p.name)
+def test_notebook_installs_the_newest_version(notebook):
+    """``%pip install`` に ``-U`` が付いていること。
+
+    Colab には古い library-hiroba が残っていることがあり、``-U`` が無いと
+    「入っているから」で素通りする。直したはずの不具合がそのまま出続け、
+    しかも版を確かめない限り気付けない（実際に2往復を費やした）。
+    """
+    for line in raw_code(notebook).splitlines():
+        stripped = line.strip()
+        if stripped.startswith(("%pip install", "!pip install")):
+            assert " -U " in f" {stripped} ", f"{notebook.name}: -U がありません → {stripped}"
+
+
+@pytest.mark.parametrize("notebook", NOTEBOOKS, ids=lambda p: p.name)
+def test_notebook_version_guard_is_not_ahead_of_the_release(notebook):
+    """``NEEDS`` が、いま出ている版より先を指していないこと。
+
+    逆向き（NEEDS が古いまま）も困る。修正を入れた版を NEEDS に上げ忘れると、
+    見張りを素通りした古い版で、直したはずの不具合がそのまま出る。
+    そちらは機械では判断できないので、ここでは上限だけを見る。
+    """
+    match = re.search(r'NEEDS\s*=\s*"([0-9]+(?:\.[0-9]+)*)"', raw_code(notebook))
+    if match is None:
+        return
+    def numbers(text):
+        return tuple(int(part) for part in text.split("."))
+    assert numbers(match.group(1)) <= numbers(library_hiroba.__version__), (
+        f"{notebook.name}: NEEDS={match.group(1)} は未公開の版です"
+        f"（いまの __version__ は {library_hiroba.__version__}）"
+    )

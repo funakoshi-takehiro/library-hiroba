@@ -50,7 +50,7 @@ GitHub Actions と PyPI が直接信頼関係を結ぶ Trusted Publishing のし
 
 ## 手順3: GitHub に環境「pypi」を作る
 
-https://github.com/funakoshi-takehiro/library-hiroba/settings/environments で「New environment」を押し、手順2と同じ `pypi` という名前で作成します。保護ルールの設定は不要です。
+https://github.com/funakoshi-takehiro/ui-hiroba/settings/environments で「New environment」を押し、手順2と同じ `pypi` という名前で作成します。保護ルールの設定は不要です。
 
 ---
 
@@ -81,7 +81,7 @@ git push origin v0.1.0
 
 ## 手順C: 結果を確認する
 
-https://github.com/funakoshi-takehiro/library-hiroba/actions で「Release to PyPI」が動きます（1〜3分）。ワークフローはタグと `__version__` の照合、lint とテスト、`twine check` を通してから公開します。
+https://github.com/funakoshi-takehiro/ui-hiroba/actions で「Release to PyPI」が動きます（1〜3分）。ワークフローはタグと `__version__` の照合、lint とテスト、`twine check` を通してから公開します。
 
 緑のチェックが付いたら、https://pypi.org/project/library-hiroba/ と、Colab での `!pip install library-hiroba` を確認します。反映には数分かかることがあります。
 

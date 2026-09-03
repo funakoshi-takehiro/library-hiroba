@@ -31,15 +31,22 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/funakoshi-takehiro/library-hiroba"
-Repository = "https://github.com/funakoshi-takehiro/library-hiroba"
-Issues = "https://github.com/funakoshi-takehiro/library-hiroba/issues"
-Changelog = "https://github.com/funakoshi-takehiro/library-hiroba/releases"
+Homepage = "https://github.com/funakoshi-takehiro/ui-hiroba"
+Repository = "https://github.com/funakoshi-takehiro/ui-hiroba"
+Issues = "https://github.com/funakoshi-takehiro/ui-hiroba/issues"
+Changelog = "https://github.com/funakoshi-takehiro/ui-hiroba/releases"
 
 [project.optional-dependencies]
 # ai は Colab で言語モデルを動かすときだけ必要。既定では入れない
 # （ui だけを使う環境に torch を持ち込まないため）
-ai = ["transformers", "torch"]
+#
+# 下限は当てずっぽうではなく、一覧に載せたモデルが要求する版：
+#   transformers>=4.51 … MODELS の qwen3_06 / qwen3_17 は Qwen3。モデルカードが
+#     「transformers<4.51.0 ではエラーになる」と明記しており、config.json の
+#     transformers_version も 4.51.0。下限が無いと、古い版が入っている環境で
+#     KeyError: 'qwen3' という原因の分からない形で落ちる
+#   torch>=2.0 … transformers 4.51 自身が要求する下限
+ai = ["transformers>=4.51", "torch>=2.0"]
 dev = ["pytest", "ruff>=0.16", "build", "twine", "nbformat"]
 gallery = ["playwright"]
 
