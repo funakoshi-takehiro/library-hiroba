@@ -118,7 +118,7 @@ MODELS = {
         },
     },
     "qwen3_17": {
-        "label": "Qwen3 1.7B（この一覧でいちばん賢い・重い）",
+        "label": "Qwen3 1.7B（おまかせで選ばれるうちでは最上・重い）",
         "colab_id": "Qwen/Qwen3-1.7B",
         "colab_revision": "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e",
         "browser_repo": "onnx-community/Qwen3-1.7B-ONNX",
@@ -126,10 +126,49 @@ MODELS = {
         "browser_variants": ("qwen3_17-q4",),
         "approx_mb": {"browser": 1300, "colab": 3400},
         "has_thinking": True,
-        "rank": 5,
+        "rank": 6,
         "needs": {
             "browser": {"webgpu": True, "memory_gb": 8, "storage_mb": 2000},
             "colab": {"ram_gb": 8, "vram_gb": 4},
+        },
+    },
+    "qwen35_08": {
+        # 0.8B なのにブラウザでは 469MB（q4f16）で、いまの qwen05（900MB）より軽い。
+        # 本家は画像も扱える形（model_type は qwen3_5）だが、pipeline は
+        # Qwen3_5ForCausalLM を作って文章生成として動くことを実機で確認済み。
+        # ブラウザ側は同じモデルの**テキスト塔だけ**を書き出した ONNX を使う
+        # （onnx-community が -Text-ONNX として公開している）。文章だけを扱う
+        # このライブラリの用途では、両者は同じ重みを見ている
+        "label": "Qwen3.5 0.8B（この一覧でいちばん新しい・軽いのに賢い）",
+        "colab_id": "Qwen/Qwen3.5-0.8B",
+        "colab_revision": "2fc06364715b967f1860aea9cf38778875588b17",
+        "browser_repo": "onnx-community/Qwen3.5-0.8B-Text-ONNX",
+        "browser_key": "qwen35_08-q4f16",
+        "browser_variants": ("qwen35_08-q4f16", "qwen35_08-q4"),
+        "approx_mb": {"browser": 469, "colab": 1800},
+        "has_thinking": True,
+        "rank": 5,
+        "needs": {
+            "browser": {"webgpu": True, "memory_gb": 4, "storage_mb": 800},
+            "colab": {"ram_gb": 4, "vram_gb": None},
+        },
+    },
+    "qwen3_4b": {
+        # この一覧でいちばん賢い。ただしブラウザで 2.9GB を生徒一人ひとりが
+        # 落とすことになる（40人で 116GB）。**auto と既定では選ばない**のは
+        # そのため。先生が名前を書いたときだけ動く（"auto": False）
+        "label": "Qwen3 4B Instruct（いちばん賢い・とても重い／名前を書いたときだけ）",
+        "colab_id": "Qwen/Qwen3-4B-Instruct-2507",
+        "colab_revision": "cdbee75f17c01a7cc42f958dc650907174af0554",
+        "browser_repo": "onnx-community/Qwen3-4B-Instruct-2507-ONNX",
+        "browser_key": "qwen3_4b-q4f16",
+        "browser_variants": ("qwen3_4b-q4f16", "qwen3_4b-q4"),
+        "approx_mb": {"browser": 2900, "colab": 8100},
+        "auto": False,
+        "rank": 7,
+        "needs": {
+            "browser": {"webgpu": True, "memory_gb": 8, "storage_mb": 4000},
+            "colab": {"ram_gb": 16, "vram_gb": 12},
         },
     },
     "llmjp150m": {
@@ -392,7 +431,18 @@ def _probe_runtime() -> dict:
 # ---------------------------------------------------------------------------
 
 # 控えめなものから順に。おすすめは「動くもののうち、いちばん後ろ」になる
-_RANKED = sorted(MODELS, key=lambda name: MODELS[name]["rank"])
+def auto_ok(name: str) -> bool:
+    """``load("auto")`` と ``recommend()`` が選んでよいモデルか。
+
+    重すぎるものを一覧には載せたい（先生が名前を書けば動く）が、機械に
+    選ばせたくはない。ブラウザで 2.9GB を生徒一人ひとりが落とすような判断は、
+    教室の回線を知っている人がするべきで、こちらが勝手に決めることではない。
+    """
+    return MODELS[name].get("auto", True)
+
+
+# おすすめの候補。auto を切ったものは入らない（一覧 MODELS には残る）
+_RANKED = sorted((n for n in MODELS if auto_ok(n)), key=lambda name: MODELS[name]["rank"])
 _SAFEST = _RANKED[0]
 
 # 測れなかったときに、その環境で何が分からなかったのかを言うための名前
@@ -448,6 +498,15 @@ def _why(name: str, environment: dict) -> str:
     """``name`` になった理由。「なぜこれ以上にしなかったか」を言う。"""
     better = [n for n in _RANKED if MODELS[n]["rank"] > MODELS[name]["rank"]]
     if not better:
+        # 「一覧でいちばん賢い」とは言わない。auto から外したものが一覧には
+        # 残っており（qwen3_4b）、そちらのほうが賢い。嘘になる
+        heavier = [n for n in MODELS if not auto_ok(n)]
+        if heavier:
+            return (
+                f"この環境なら、おまかせで選べるうちでいちばん賢い{_short_label(name)}が"
+                f"動きます。さらに上の{_short_label(heavier[-1])}は、"
+                "通信量が大きいので名前を書いたときだけ動きます。"
+            )
         return f"この環境なら、一覧でいちばん賢い{_short_label(name)}が動きます。"
     lacking = "・".join(_unmet(better[0], environment))
     return (

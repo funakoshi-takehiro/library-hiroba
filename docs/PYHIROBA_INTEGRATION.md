@@ -214,7 +214,9 @@ optimum-cli export onnx --model llm-jp/llm-jp-3-440m-instruct3 --task text-gener
 
 #### LLM-jp の現状（2026-08 時点）
 
-`llm-jp-3` で ONNX 版が公開されているのは **150M の instruct2 だけ**です。440M・980M・1.8B・3.7B・13B と、instruct3 系にはいずれも変換版がありません。そのため、**上の変換を自分で行わない限り、LLM-jp を 150M より増やすことはできません**。
+`llm-jp-3` で ONNX 版が公開されているのは **150M だけ**です（2026-09 に全 author を調べ直しました。instruct2 と instruct3 の2つがあります）。440M・980M・1.8B・3.7B・13B、および新しい `llm-jp-4`（8B・32B・33B）には変換版がありません。そのため、**上の変換を自分で行わない限り、LLM-jp を 150M より増やすことはできません**。
+
+Qwen 側は状況が進んでおり、0.7.0 で `qwen35_08`（Qwen3.5 0.8B・469MB）と `qwen3_4b`（Qwen3 4B・2.9GB）を足しました。詳しくは [`PYHIROBA_MODELS_REQUEST.md`](PYHIROBA_MODELS_REQUEST.md) に。なお **Qwen3 8B は ONNX Runtime GenAI 形式のみ**で transformers.js では読めず、**Qwen3.5 の 2B / 4B は画像つき版だけ**です。
 
 ### `ai.talk()` について（本体側の対応は不要です）
 

@@ -41,12 +41,13 @@ Changelog = "https://github.com/funakoshi-takehiro/ui-hiroba/releases"
 # （ui だけを使う環境に torch を持ち込まないため）
 #
 # 下限は当てずっぽうではなく、一覧に載せたモデルが要求する版：
-#   transformers>=4.51 … MODELS の qwen3_06 / qwen3_17 は Qwen3。モデルカードが
-#     「transformers<4.51.0 ではエラーになる」と明記しており、config.json の
-#     transformers_version も 4.51.0。下限が無いと、古い版が入っている環境で
-#     KeyError: 'qwen3' という原因の分からない形で落ちる
+#   transformers>=4.57 … MODELS の qwen35_08 は Qwen3.5（model_type は qwen3_5）。
+#     本家 config.json の transformers_version が 4.57.0.dev0 で、4.57.0 が
+#     これを読める最初の安定版。下限が無いと、古い版が入っている環境で
+#     KeyError: 'qwen3_5' という原因の分からない形で落ちる
+#     （qwen3_06 / qwen3_17 の Qwen3 は 4.51 以降。厳しいほうに合わせる）
 #   torch>=2.0 … transformers 4.51 自身が要求する下限
-ai = ["transformers>=4.51", "torch>=2.0"]
+ai = ["transformers>=4.57", "torch>=2.0"]
 dev = ["pytest", "ruff>=0.16", "build", "twine", "nbformat"]
 gallery = ["playwright"]
 

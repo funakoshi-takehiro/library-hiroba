@@ -171,7 +171,16 @@ def _bare_model_name(repo: str) -> str:
     ``onnx-community/Qwen2.5-0.5B-Instruct`` も ``qwen2.5-0.5b-instruct`` になる。
     """
     name = repo.split("/")[-1].lower()
-    for mark in ("-onnx", "_onnx"):
+    # 落としてよいのは**書き出しの形式を表す印だけ**。instruct2 / instruct3 のような
+    # 版の違いは落とさない（落とすとこの検査の意味が無くなる）。
+    #
+    # ``-text`` は onnx-community が「テキスト塔だけを書き出した」ことを表す印で、
+    # Qwen3.5 0.8B がこれに当たる。本家が同じモデルかどうかは実際に突き合わせた:
+    #   - hidden_size / layers / heads / kv_heads / intermediate / vocab /
+    #     max_position / rms_norm_eps の8項目がすべて一致
+    #   - チャットテンプレートが 7755 文字で完全一致（sha256 273d8e0e683b8850）
+    # 文章しか扱わないこのライブラリでは、両者は同じ重みを見ている。
+    for mark in ("-onnx", "_onnx", "-text"):
         if name.endswith(mark):
             name = name[: -len(mark)]
     return name
@@ -925,22 +934,62 @@ def colab_env(**changes):
         # ブラウザ。WebGPU が無ければ WASM でも待てる 150M まで落とす
         (browser_env(), "qwen3_17"),
         (browser_env(webgpu=False), "llmjp150m"),
-        (browser_env(memory_gb=4), "qwen3_06"),
+        # メモリ 4GB あれば、469MB しかない qwen35_08 が拾える
+        (browser_env(memory_gb=4), "qwen35_08"),
         # 低スペック機。qwen05 より軽い qwen3_06 が拾えるので 150M まで落とさない
         (browser_env(memory_gb=2), "qwen3_06"),
         (browser_env(memory_gb=1), "llmjp150m"),
         # 回線ではなく置き場所が足りない場合も、落とす理由になる
-        (browser_env(storage_mb=1000), "qwen3_06"),
+        (browser_env(storage_mb=1000), "qwen35_08"),
         (browser_env(storage_mb=500), "llmjp150m"),
         # Colab。CPU だけなら 1.5B 以上は待てないので選ばない
-        (colab_env(), "qwen3_06"),
+        (colab_env(), "qwen35_08"),
         (colab_env(vram_gb=15.0), "qwen3_17"),
-        (colab_env(vram_gb=2.0), "qwen3_06"),
+        (colab_env(vram_gb=2.0), "qwen35_08"),
         (colab_env(ram_gb=3.0), "llmjp150m"),
     ],
 )
 def test_the_best_model_that_actually_runs_is_chosen(found, expected):
     assert _ai.choose(found)[0] == expected
+
+
+@pytest.mark.parametrize(
+    "found",
+    [
+        browser_env(memory_gb=64, storage_mb=999999),
+        colab_env(ram_gb=256.0, vram_gb=80.0),
+        browser_env(),
+        colab_env(),
+    ],
+)
+def test_a_heavy_model_is_never_chosen_for_you(found):
+    """``auto`` は ``auto=False`` のモデルを選ばないこと。
+
+    ブラウザで 2.9GB を生徒一人ひとりが落とすかどうかは、教室の回線を知っている
+    人が決めることで、機械が勝手に決めてよい話ではない。**どれだけ潤沢な環境でも
+    選ばれない**ことを、環境を振って確かめる。
+    """
+    heavy = [n for n in _ai.MODELS if not _ai.auto_ok(n)]
+    assert heavy, "auto を切ったモデルが無いと、この検査は何も守っていない"
+    assert _ai.choose(found)[0] not in heavy
+
+
+def test_a_heavy_model_is_still_listed_and_loadable_by_name():
+    """おまかせでは選ばれないが、名前を書けば使えること（一覧にも残る）。"""
+    heavy = next(n for n in _ai.MODELS if not _ai.auto_ok(n))
+    assert heavy in _ai.MODELS
+    assert _ai.resolve(heavy)[0] == heavy, "名前で指定しても解決できません"
+    listed = [m["name"] for m in run(_ai.Ai().models())]
+    assert heavy in listed, "ai.models() の一覧から消えています"
+
+
+def test_the_reason_does_not_claim_the_top_when_something_heavier_exists():
+    """「一覧でいちばん賢い」と言い切らないこと。
+
+    auto から外したものが一覧には残っているので、言い切ると嘘になる。
+    """
+    _name, reason = _ai.choose(browser_env(memory_gb=64, storage_mb=999999))
+    assert "一覧でいちばん賢い" not in reason
 
 
 @pytest.mark.parametrize("found", [{"known": False}, browser_env(), colab_env()])
