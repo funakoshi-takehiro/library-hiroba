@@ -1988,3 +1988,32 @@ def test_embedding_does_not_wait_for_a_running_generation(fresh_ai, monkeypatch)
         assert done.wait(timeout=3), "生成の鍵に引きずられて、読み込みが返ってきません"
     finally:
         fresh_ai._generating.release()
+
+
+@pytest.mark.parametrize("name", sorted(_ai.MODELS))
+def test_the_free_space_needed_covers_the_download(name):
+    """空き容量の下限が、実際の配布サイズを下回らないこと。
+
+    下回っていると、判定を**通ってから**途中で足りなくなる。ブラウザは
+    書き込みに失敗した時点で止まるので、生徒には「なぜか進まない」としか
+    見えない。qwen3_17 が実際にこの状態だった（下限 2000MB / 実サイズ 2147MB）。
+    """
+    spec = _ai.MODELS[name]
+    need = spec["needs"]["browser"]["storage_mb"]
+    size = spec["approx_mb"]["browser"]
+    assert need >= size, (
+        f"{name}: 空き容量の下限 {need}MB が、配布サイズ {size}MB を下回っています"
+    )
+
+
+@pytest.mark.parametrize("name", sorted(_ai.MODELS))
+def test_the_browser_key_names_a_declared_variant(name):
+    """``browser_key`` が ``browser_variants`` の中にあること。
+
+    既定の量子化を差し替えるとき（q4f16 → q4 のように）、片方だけ直すと
+    一覧に無い名前を本体へ送ることになる。
+    """
+    spec = _ai.MODELS[name]
+    assert spec["browser_key"] in spec["browser_variants"], (
+        f"{name}: 既定の {spec['browser_key']} が browser_variants にありません"
+    )

@@ -58,6 +58,16 @@ __all__ = ["Ai", "ai"]
 # 固定できる。上げるときは colab_id と browser_repo と揃えて上げること。
 #   確かめ方: curl -s https://huggingface.co/api/models/<colab_id> | jq -r .sha
 #
+# ``approx_mb`` は**10進の MB**（1MB = 1,000,000 バイト）。校内の回線の話をするとき、
+# 先生も回線業者も 10 進で数えるため。MiB と混ぜない。
+#
+# ブラウザ側の数字は ``onnx/`` の中の**その変種のファイルをすべて足した**もの。
+# 大きなモデルは設計図（``model_q4.onnx``、数百 KB）と重み（``model_q4.onnx_data``、
+# 続きがあれば ``_data_1`` ``_data_2`` …）に分かれるため、設計図だけを見ると
+# 448MB を 0.6MB と数えてしまう（本体側が実際にこれを踏んだ）。
+#   数字は読みやすさのために**切り上げ**てある（足りないと言うより多めに言う）。
+#   確かめ方: python tools/check_model_sizes.py
+#
 # ``rank`` と ``needs`` は ``recommend()`` が使う（下の「おすすめを選ぶ」参照）。
 #   rank  … 答えの質の順。大きいほど良い。重なりが無いこと（テストで固定）
 #   needs … その環境で実用になる最低条件。approx_mb から機械的に出さず手で書く。
@@ -72,7 +82,7 @@ MODELS = {
         "browser_repo": "onnx-community/Qwen2.5-0.5B-Instruct",
         "browser_key": "qwen05-q8",
         "browser_variants": ("qwen05-q8", "qwen05-q4"),
-        "approx_mb": {"browser": 900, "colab": 1000},
+        "approx_mb": {"browser": 520, "colab": 1000},
         "rank": 2,
         "needs": {
             "browser": {"webgpu": True, "memory_gb": 4, "storage_mb": 1400},
@@ -86,7 +96,7 @@ MODELS = {
         "browser_repo": "onnx-community/Qwen2.5-1.5B-Instruct",
         "browser_key": "qwen15-q4",
         "browser_variants": ("qwen15-q4",),
-        "approx_mb": {"browser": 1600, "colab": 3100},
+        "approx_mb": {"browser": 1800, "colab": 3100},
         "rank": 4,
         "needs": {
             "browser": {"webgpu": True, "memory_gb": 8, "storage_mb": 2400},
@@ -106,12 +116,16 @@ MODELS = {
         # 占めるので、そこが fp32 で残ると 4bit にした分を打ち消して上回る。
         "browser_key": "qwen3_06-q8",
         "browser_variants": ("qwen3_06-q8", "qwen3_06-q4"),
-        "approx_mb": {"browser": 589, "colab": 1500},
+        "approx_mb": {"browser": 620, "colab": 1500},
         "has_thinking": True,
         "rank": 3,
-        # 一覧の中でいちばん小さいのに、答えは 150M よりずっとまともになる。
-        # メモリの少ない端末を救えるのはここなので、条件をいちばん緩くしてある
-        # （qwen05 より下。navigator.deviceMemory の 2 は低スペック機の区分）
+        # 【要・実機測定】条件をいちばん緩くしてあるのは、以前この表が
+        # 「qwen3_06 は 589MB で qwen05 の 900MB より小さい」としていたため。
+        # 実測すると **qwen3_06 620MB / qwen05 520MB で、逆に大きい**（2026-09、
+        # 本体側の「設計図だけ数えていた」報告を受けて測り直した）。
+        # したがって「小さいから条件を緩くしてよい」という理由は成り立たない。
+        # ただし実際に動く／動かないは実機でしか分からないため、値は当てずっぽうで
+        # 動かさず据え置く。低スペック機で確かめてから決めること
         "needs": {
             "browser": {"webgpu": True, "memory_gb": 2, "storage_mb": 900},
             "colab": {"ram_gb": 4, "vram_gb": None},
@@ -124,11 +138,11 @@ MODELS = {
         "browser_repo": "onnx-community/Qwen3-1.7B-ONNX",
         "browser_key": "qwen3_17-q4",
         "browser_variants": ("qwen3_17-q4",),
-        "approx_mb": {"browser": 1300, "colab": 3400},
+        "approx_mb": {"browser": 2200, "colab": 3400},
         "has_thinking": True,
         "rank": 6,
         "needs": {
-            "browser": {"webgpu": True, "memory_gb": 8, "storage_mb": 2000},
+            "browser": {"webgpu": True, "memory_gb": 8, "storage_mb": 2700},
             "colab": {"ram_gb": 8, "vram_gb": 4},
         },
     },
@@ -143,9 +157,14 @@ MODELS = {
         "colab_id": "Qwen/Qwen3.5-0.8B",
         "colab_revision": "2fc06364715b967f1860aea9cf38778875588b17",
         "browser_repo": "onnx-community/Qwen3.5-0.8B-Text-ONNX",
-        "browser_key": "qwen35_08-q4f16",
-        "browser_variants": ("qwen35_08-q4f16", "qwen35_08-q4"),
-        "approx_mb": {"browser": 469, "colab": 1800},
+        # 既定は q4f16 ではなく q4。q4f16 は fp16 前提で、WebGPU の無い端末
+        # （GIGA 第1期の iPad、古い GPU の Windows 機）で動く保証が無い。
+        # transformers.js は WebGPU 以外での q4f16 を止めないため、失敗すると
+        # ONNX Runtime の奥の読めないエラーになる。差は 81MB しかないので、
+        # 確実に動くほうを採る（本体側の判断に合わせた）
+        "browser_key": "qwen35_08-q4",
+        "browser_variants": ("qwen35_08-q4", "qwen35_08-q4f16"),
+        "approx_mb": {"browser": 560, "colab": 1800},
         "has_thinking": True,
         "rank": 5,
         "needs": {
@@ -181,7 +200,7 @@ MODELS = {
         "browser_repo": "onnx-community/llm-jp-3-150m-instruct2-ONNX",
         "browser_key": "llmjp150m-q4",
         "browser_variants": ("llmjp150m-q4",),
-        "approx_mb": {"browser": 255, "colab": 600},
+        "approx_mb": {"browser": 270, "colab": 600},
         "rank": 1,
         # 150M なら WebGPU が無くても（WASM でも）待てる速さで返る。
         # これがあるおかげで「何も動かない環境」を作らずに済む
