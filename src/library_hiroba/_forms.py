@@ -239,7 +239,9 @@ def put_into(into: object, item: object) -> None:
     into.outputs = ({"output_type": "display_data", "data": data, "metadata": {}},)
 
 
-def display_result(result: object, into: object = None, pending: object = None) -> None:
+def display_result(
+    result: object, into: object = None, pending: object = None, stale=None
+) -> None:
     """``handler`` の返り値を表示する。
 
     受け取れる形は3つあり、どれも同じ場所に出す。
@@ -257,12 +259,22 @@ def display_result(result: object, into: object = None, pending: object = None) 
     あいだにセルの実行が終わっても、結果がフォームの下に出るようにするため）。
     書き込みは :func:`put_into` が行う。3つの形すべてで ``into`` を見るので、
     Colab では待つ・待たないにかかわらず、結果はフォームの下に出る。
+
+    ``stale`` に「もう古い」を答える関数を渡すと、**古くなった実行は書き込まない**。
+    2回押されたとき、先に押したほうが後から返ってくると、新しい質問の下に前の
+    質問の答えが残る（生徒には取り違えに見える）。取り消せないので、書くのをやめる。
     """
     from IPython.display import display
 
     waits = inspect.isawaitable(result)
     streams = inspect.isasyncgen(result)
-    if not waits and not streams:
+    # yield で書いたが async を付け忘れた handler。これを弾くと Colab では
+    # 空の出力だけが出て、PyHiroba 本体には generator が渡る（どちらも無言で
+    # 何も起きない）。書き方の惜しい間違いなので、同じ経路で受ける
+    plain_steps = inspect.isgenerator(result)
+    if not waits and not streams and not plain_steps:
+        if stale is not None and stale():
+            return
         # 待たないなら「考え中」を出す意味がない
         if into is not None:
             put_into(into, result)
@@ -274,24 +286,45 @@ def display_result(result: object, into: object = None, pending: object = None) 
         """表示するものを、出す順に並べる。"""
         if pending is not None:
             yield pending
+        came = False
         if streams:
             async for item in result:
+                came = True
+                yield item
+        elif plain_steps:
+            for item in result:
+                came = True
                 yield item
         else:
+            came = True
             yield await result
+        if not came:
+            # 1つも出さずに終わった（モデルが1文字も返さなかった回など）。
+            # 黙って抜けると「考え中」が出たまま残り、pending=None なら
+            # 画面が何も変わらない。どちらも故障と見分けが付かない
+            from ._components import alert
+
+            yield alert(
+                "答えが返ってきませんでした。もう一度試すか、短く聞いてみてください。",
+                kind="warning",
+            )
 
     async def show_each() -> None:
         try:
             if into is not None:
                 async for item in steps():
+                    if stale is not None and stale():
+                        return
                     put_into(into, item)
                 return
             # Output が無い場合。差し替えが要るときだけ取っ手を使う
             # （cell 全体を消すと、フォーム自体まで消えてしまうため）。
             # 1回しか出さないなら、ふつうに display する。
-            replaces = streams or pending is not None
+            replaces = streams or plain_steps or pending is not None
             handle = None
             async for item in steps():
+                if stale is not None and stale():
+                    return
                 if not replaces:
                     display(item)
                 elif handle is None:
@@ -302,6 +335,8 @@ def display_result(result: object, into: object = None, pending: object = None) 
             import traceback
 
             text = traceback.format_exc()
+            if stale is not None and stale():
+                return
             if into is not None:
                 # 出せる場所が Output しかない。print では拾われずに消える
                 into.outputs = ({"output_type": "stream", "name": "stderr", "text": text},)
@@ -368,10 +403,18 @@ class Form(Widget):
         self.clear_on_submit = clear_on_submit
         self.pending = _resolve_pending(pending)
         self.form_id = unique_name("hui-form")
+        # 何回目の押下かを数える。古くなった実行が画面を上書きしないようにするため
+        self._run = 0
 
     # --- 表示 ---------------------------------------------------------------
 
     def fragment(self) -> str:
+        # 本体がボタンの押下を受け取ったときに引けるよう、ここで登録する。
+        # **_repr_html_ ではなく fragment に置く。** ui.stack(...) のような容器に
+        # 入れると Container.fragment() が子の fragment() を呼ぶので _repr_html_ は
+        # 通らず、ボタンだけが描かれて get_form() が None を返していた。本体の
+        # worker は form が None なら黙って戻るため、押しても何も起きなかった
+        _register(self)
         title = (
             f'<div class="hui-form-title">{esc(self.title)}</div>' if self.title is not None else ""
         )
@@ -397,11 +440,14 @@ class Form(Widget):
         parts = [base_css(), COMPONENT_CSS["form"], COMPONENT_CSS["widgets"]]
         return "<style>" + "\n".join(parts) + "</style>"
 
-    def _repr_html_(self) -> str:
-        # PyHiroba 経路（IPython が無い環境）ではこちらが使われる。
-        # 本体がボタンの押下を受け取ったときに引けるよう、ここで登録する。
-        _register(self)
-        return super()._repr_html_()
+    def needs_ipywidgets(self) -> bool:
+        """HTML だけでは動かない部品であること。
+
+        容器（:class:`Container`）がこれを見て、Colab では子を1つずつ出す。
+        HTML の中のボタンは JavaScript が無ければ動かないため、容器が1枚の
+        HTML にまとめてしまうと、押しても何も起きないフォームになる。
+        """
+        return True
 
     def _ipython_display_(self) -> None:
         """IPython のある環境（Colab など）での表示。
@@ -430,7 +476,14 @@ class Form(Widget):
                     description=label,
                 )
             elif field.kind == "number":
-                control = widgets.FloatText(value=float(field.default or 0), description=label)
+                # FloatText ではなく Text。FloatText は空を持てないので、既定を
+                # 書かなかった欄が **Colab では 0、PyHiroba では空** になり、
+                # 触らずに送ると Colab は 0 として黙って進み、PyHiroba は
+                # 「数を入力してください」で止まる。HTML の <input type="number">
+                # は空を許すので、そちらに合わせる。数への変換は convert() が行う
+                control = widgets.Text(
+                    value=str(field.default), placeholder=field.placeholder, description=label
+                )
             elif field.kind == "multiline":
                 control = widgets.Textarea(
                     value=str(field.default), placeholder=field.placeholder, description=label
@@ -463,6 +516,11 @@ class Form(Widget):
             if self.clear_on_submit:
                 for name in clearable:
                     controls[name].value = ""
+            # 何回目の押下かを覚える。run_detached は押下ごとに別のスレッドを立て、
+            # 古い実行を止められない。遅い1回目が速い2回目より後に返ると、
+            # 新しい質問の下に前の答えが残るので、古い実行には書かせない
+            self._run += 1
+            mine = self._run
             # display_result まで含めて囲む。ipywidgets の押下処理から出た例外は
             # 呼び出し元に戻る先が無く、Colab では画面にもログにも出ないまま消える
             # （押しても何も起きない、という形だけが残る）
@@ -470,8 +528,17 @@ class Form(Widget):
                 # handler を直に呼ばず submit() を通す。欄の種類に合わせた変換が
                 # ここにあり、飛ばすと Colab だけ handler に違う型が渡る
                 result = self.submit(**values)
-                display_result(result, into=output, pending=self.pending)
-            except Exception:  # noqa: BLE001 — 入力の誤りも、出さないと直せない
+                display_result(
+                    result, into=output, pending=self.pending, stale=lambda: self._run != mine
+                )
+            except ValueError as error:
+                # 入力の誤り（数の欄に文字、選択肢に無い値…）。PyHiroba 本体は
+                # この文言をそのまま画面に出すので、Colab も同じものを出す。
+                # traceback を出すと、同じ書き間違いが環境によって別の顔で出る
+                from ._components import alert
+
+                put_into(output, alert(str(error), kind="warning"))
+            except Exception:  # noqa: BLE001 — 書き間違いも、出さないと直せない
                 import traceback
 
                 output.outputs = (

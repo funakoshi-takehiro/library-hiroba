@@ -92,8 +92,23 @@ ui.stack(ui.card("目標", "..."), ui.progress(3, max=10))   # 縦に積む
 ui.columns(ui.stat("得点", 90), ui.stat("順位", 3))        # 横に並べる
 
 parts = [ui.stat("得点", 90), ui.stat("順位", 3)]
-ui.columns(parts)                                          # リストで渡してもよい
+ui.columns(parts)                                          # リストでもよい
+ui.columns(ui.badge(c) for c in "ABC")                     # ジェネレータでもよい
 ```
+
+値の場所にも部品を入れられます。`ui.chat()` と同じ書き方です。
+
+```python
+ui.card("テストの結果", ui.table(scores))        # カードの中に表
+ui.reveal(ui.table(answers), summary="答えを見る")  # 折りたたみの中に表
+```
+
+`gap` や `widths` の長さには**単位を付けてください**（`gap="8px"`）。単位が無いと、
+ブラウザはその指定ごと無かったことにするため、間隔だけが静かに消えます。
+
+`ui.form()` を `ui.stack()` などに入れることもできます。ただし Google Colab では、
+入力欄を動かすために**容器の中身を1つずつ出す**ため、容器の間隔や横並びは効きません
+（1枚にまとめると、押しても何も起きないボタンになってしまいます）。
 
 セルの途中で表示したい場合は `ui.show(...)` を使います。Google Colab ではその場に表示され、IPython のない PyHiroba ではコンポーネントを返すので、セル最後の式として置きます。
 

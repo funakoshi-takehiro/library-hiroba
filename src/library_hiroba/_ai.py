@@ -288,12 +288,22 @@ def as_texts(value: object, argument: str) -> list[str]:
             'リストにしてください（例: [b["desc"] for b in books]）'
         )
     try:
-        items = [str(item) for item in value]
+        items = list(value)
     except TypeError:
         raise ValueError(
             f"{argument} には文のリストを渡してください"
             f"（渡されたのは {type(value).__name__}）"
         ) from None
+    # 要素を str() で丸めない。辞書のリスト（本の一覧でいちばん自然な形）を渡すと
+    # "{'title': '…', 'desc': '…'}" が丸ごとベクトル化され、Python の記号とキー名まで
+    # 意味に混ざる。例外にならないので「なぜか結果がおかしい」とだけ見える
+    wrong = next((item for item in items if not isinstance(item, str)), None)
+    if wrong is not None:
+        raise ValueError(
+            f"{argument} の中に、文字列でないものがあります（例: {wrong!r}）。"
+            "文だけのリストにしてください"
+            '（辞書の一覧なら [b["desc"] for b in books] のように取り出します）。'
+        )
     if len(items) > EMBED_LIMIT:
         raise ValueError(
             f"一度に渡せるのは {EMBED_LIMIT} 件までです（渡されたのは {len(items)} 件）。"
@@ -595,7 +605,13 @@ class Recommendation:
         if found.get("label"):
             rows.append(["動いている場所", found["label"]])
         if found.get("where") == "browser":
-            rows.append(["WebGPU", "使えます" if found.get("webgpu") else "使えません"])
+            # 本体が ai-probe に答えなかった場合（対応は任意）、webgpu は
+            # 既定の False のまま。それを「使えません」と書くと、調べた結果に
+            # 見える。_unmet は用心のため False 扱いで選ぶが、表示は事実を言う
+            if found.get("known"):
+                rows.append(["WebGPU", "使えます" if found.get("webgpu") else "使えません"])
+            else:
+                rows.append(["WebGPU", "調べられませんでした"])
         if found.get("vram_gb") is not None:
             rows.append(["GPU のメモリ", f"約 {found['vram_gb']}GB"])
         for key in ("memory_gb", "ram_gb"):
@@ -719,7 +735,10 @@ class Talk:
 
     def _prompt(self, message: object) -> str:
         """直前のやりとりを添えた、モデルに渡す文章を作る。"""
-        recent = self.messages[-self.keep * 2 :]
+        # まだ答えが届いていない席（中身が空）は渡さない。往復が重なっている
+        # あいだ、モデルに「AI: 」という空の発言を見せないため
+        history = [m for m in self.messages if m["role"] == "user" or m["content"] != ""]
+        recent = history[-self.keep * 2 :]
         lines = [self.instruction, ""]
         for said in recent:
             who = "あなた" if said["role"] == "user" else "AI"
@@ -736,11 +755,18 @@ class Talk:
         return text.strip()
 
     async def ask(self, message: object):
-        """1往復して、会話ぜんぶを返す。"""
+        """1往復して、会話ぜんぶを返す。
+
+        **答えの席は、質問を足した直後に取っておく。** 往復が重なったとき
+        （生徒が2回押した、セルとフォームから同時に聞いた）、答えが届いた順に
+        足すと「質問A・質問B・答えB・答えA」と並び、**答えが別の質問の下に付く**。
+        先に席を取れば、遅れて届いても自分の質問のすぐ下に入る。
+        """
         prompt = self._prompt(message)
         self.conversation.say(message)
+        seat = self.conversation.reserve_reply()
         answer = await self._ai.ask(prompt, max_tokens=self.max_tokens)
-        self.conversation.reply(self._clean(answer) or self.NO_ANSWER)
+        self.conversation.fill_reply(seat, self._clean(answer) or self.NO_ANSWER)
         return self.conversation
 
     #: 待っているあいだ、経過を出し直す間隔（秒）
@@ -774,12 +800,15 @@ class Talk:
 
         prompt = self._prompt(message)
         self.conversation.say(message)
+        # ask() と同じ理由で、答えの席を先に取る（重なっても対応が崩れない）
+        seat = self.conversation.reserve_reply()
 
         def view(content):
-            return ui.conversation(
-                [*self.messages, {"role": "assistant", "content": content}],
-                names=self.conversation.names,
-            )
+            # 書きかけは会話に入れず、その回だけの写しに載せる。入れてしまうと
+            # 次の質問に渡す記憶が、書きかけの文で埋まる
+            shown = self.messages
+            shown[seat]["content"] = content
+            return ui.conversation(shown, names=self.conversation.names)
 
         # 打った内容を、答えを待たずに先に返す。ここを待ってから出すと、
         # 画面には「考え中」しか無い時間が続き、送れたのかどうかも分からない
@@ -810,7 +839,7 @@ class Talk:
                 yield view(partial)
         # 一文字も出ないまま終わることがある（考えている途中だけを書いて
         # 字数が尽きた場合など）。空の吹き出しは故障に見えるので、そう言う
-        self.conversation.reply(self._clean(text) or self.NO_ANSWER)
+        self.conversation.fill_reply(seat, self._clean(text) or self.NO_ANSWER)
         yield self.conversation
 
     def form(self, placeholder: str = "メッセージを入力", submit_label: str = "送信", **kwargs):
@@ -1509,10 +1538,20 @@ class Ai:
             yield last
 
     def _ask_with_transformers(self, prompt: object, max_tokens: int | None) -> str:
-        out = self._pipe(
-            self._build_input([{"role": "user", "content": str(prompt)}]),
-            **self._generation_kwargs(max_tokens),
-        )
+        # stream 側と同じ鍵を取る。こちらが取らないと「同時に2つ生成しない」が
+        # 守られず、フォームの逐次出力とセルの ask() が同じ pipeline に同時に
+        # 入れる（transformers の pipeline はスレッド安全ではない）
+        if not self._generating.acquire(blocking=False):
+            raise RuntimeError(
+                "前の生成がまだ終わっていません。終わるのを待ってから、もう一度試してください。"
+            )
+        try:
+            out = self._pipe(
+                self._build_input([{"role": "user", "content": str(prompt)}]),
+                **self._generation_kwargs(max_tokens),
+            )
+        finally:
+            self._generating.release()
         text = out[0]["generated_text"]
         # 会話形式で渡すと返り値も会話の並びになる。最後の発言を取り出す。
         if isinstance(text, list):

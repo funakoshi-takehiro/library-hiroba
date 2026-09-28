@@ -28,6 +28,11 @@ def run(coro):
     return asyncio.run(coro)
 
 
+def run_async(coro):
+    """重なりを作るテスト用。名前を分けて、読む側に意図を見せる。"""
+    return asyncio.run(coro)
+
+
 def pinned(make):
     """``from_pretrained`` の代役。``revision`` を渡されなければ落ちる。
 
@@ -2017,3 +2022,164 @@ def test_the_browser_key_names_a_declared_variant(name):
     assert spec["browser_key"] in spec["browser_variants"], (
         f"{name}: 既定の {spec['browser_key']} が browser_variants にありません"
     )
+
+
+# --- 2026-09 の監査で見つかったもの ------------------------------------------
+
+
+class SlowThenFast:
+    """1回目だけ遅く答える偽の ai。往復を重ねるために使う。"""
+
+    def __init__(self, slow: float = 0.4):
+        self.count = 0
+        self.slow = slow
+
+    def is_loaded(self) -> bool:
+        return True
+
+    async def load(self, *args, **kwargs) -> str:
+        return "ok"
+
+    async def _reply(self) -> str:
+        self.count += 1
+        mine = self.count
+        await asyncio.sleep(self.slow if mine == 1 else 0.0)
+        return f"答え{mine}"
+
+    async def ask(self, prompt, max_tokens=64) -> str:
+        return await self._reply()
+
+    async def stream(self, prompt, max_tokens=64):
+        yield await self._reply()
+
+
+def pairs(talk) -> list[tuple[str, str]]:
+    """会話を (発言者, 中身) の並びにする。"""
+    return [(m["role"], str(m["content"])) for m in talk.messages]
+
+
+def test_overlapping_turns_keep_each_answer_under_its_own_question():
+    """往復が重なっても、答えが自分の質問の下に入ること（H-4）。
+
+    以前は届いた順に足していたため「質問A・質問B・答えB・答えA」と並び、
+    **答えが別の質問の下に付いた**。履歴そのものが崩れるので次の往復にも響く。
+    """
+
+    async def run():
+        talk = _ai.Talk(SlowThenFast())
+        first = asyncio.ensure_future(talk.ask("質問A"))
+        await asyncio.sleep(0.05)
+        second = asyncio.ensure_future(talk.ask("質問B"))
+        await asyncio.gather(first, second)
+        return pairs(talk)
+
+    assert run_async(run()) == [
+        ("user", "質問A"),
+        ("assistant", "答え1"),
+        ("user", "質問B"),
+        ("assistant", "答え2"),
+    ]
+
+
+def test_overlapping_streams_keep_each_answer_under_its_own_question():
+    """``stream()`` でも同じであること（H-4）。"""
+
+    async def run():
+        talk = _ai.Talk(SlowThenFast())
+
+        async def drain(message):
+            async for _ in talk.stream(message):
+                pass
+
+        first = asyncio.ensure_future(drain("質問A"))
+        await asyncio.sleep(0.05)
+        second = asyncio.ensure_future(drain("質問B"))
+        await asyncio.gather(first, second)
+        return pairs(talk)
+
+    assert run_async(run()) == [
+        ("user", "質問A"),
+        ("assistant", "答え1"),
+        ("user", "質問B"),
+        ("assistant", "答え2"),
+    ]
+
+
+def test_an_unfinished_turn_is_not_sent_to_the_model():
+    """まだ答えの入っていない席を、prompt に混ぜないこと（H-4）。"""
+    talk = _ai.Talk(SlowThenFast())
+    talk.conversation.say("質問A")
+    talk.conversation.reserve_reply()
+    prompt = talk._prompt("質問B")
+    assert "AI: \n" not in prompt and not prompt.endswith("AI: ")
+    assert "質問A" in prompt
+
+
+def test_documents_that_are_not_text_are_refused():
+    """文字列でない要素を止めること（H-5）。
+
+    辞書のリストは本の一覧でいちばん自然な形なのに、``str()`` で丸められて
+    ``"{'title': …}"`` が丸ごとベクトル化されていた。例外にならないので
+    「なぜか結果がおかしい」とだけ見える。
+    """
+    with pytest.raises(ValueError, match="文字列でないもの"):
+        _ai.as_texts([{"title": "真夜中の校舎", "desc": "怪談"}], "documents")
+    with pytest.raises(ValueError, match="文字列でないもの"):
+        _ai.as_texts([1, 2], "documents")
+    # 文のリストとジェネレータはそのまま通る
+    assert _ai.as_texts(["あ", "い"], "documents") == ["あ", "い"]
+    assert _ai.as_texts((c for c in "あい"), "documents") == ["あ", "い"]
+
+
+def test_ask_does_not_generate_while_a_stream_is_running(fresh_ai, fake_transformers):
+    """``ask()`` も生成の鍵を取ること（M-4）。
+
+    取らないと、フォームの逐次出力とセルの ``ask()`` が同じ pipeline に同時に
+    入る。transformers の pipeline はスレッド安全ではない。
+    """
+    run(fresh_ai.load())
+    fresh_ai._generating.acquire()  # 逐次出力が走っている状態にする
+    try:
+        with pytest.raises(RuntimeError, match="前の生成"):
+            run(fresh_ai.ask("質問"))
+    finally:
+        fresh_ai._generating.release()
+    # 鍵が空いていれば、これまでどおり答える
+    assert run(fresh_ai.ask("質問"))
+
+
+def test_the_lock_is_released_even_when_ask_fails(fresh_ai, fake_transformers):
+    """``ask()`` が失敗しても鍵を返すこと（M-4）。返さないと以降ずっと生成できない。"""
+    run(fresh_ai.load())
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("壊れた")
+
+    fresh_ai._pipe = explode
+    with pytest.raises(RuntimeError, match="壊れた"):
+        run(fresh_ai.ask("質問"))
+    assert fresh_ai._generating.acquire(blocking=False), "鍵が返っていません"
+    fresh_ai._generating.release()
+
+
+def test_an_unprobed_device_is_not_reported_as_checked(fresh_ai, monkeypatch):
+    """本体が ai-probe に答えなかったとき、調べた風に書かないこと（M-5）。
+
+    対応は仕様上「任意」なのに、``webgpu`` の既定値 False をそのまま
+    「使えません」と表示していた。``_unmet`` は用心のため False 扱いで選ぶが、
+    **表示は事実を言う**。
+    """
+
+    async def ask(kind, args_json):
+        return json.dumps({})  # 知らない kind に空を返す本体（webgpu が無い）
+
+    js = types.ModuleType("js")
+    js.pyhirobaAsk = ask
+    js.pyhirobaFeatures = "forms"
+    monkeypatch.setitem(sys.modules, "js", js)
+
+    found = run(fresh_ai.environment())
+    assert found["known"] is False
+    rows = dict(_ai.Recommendation("qwen05", "理由", found).rows())
+    assert rows["WebGPU"] == "調べられませんでした", rows
+    assert "使えません" not in rows["WebGPU"]

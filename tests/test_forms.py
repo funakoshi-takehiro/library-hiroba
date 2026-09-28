@@ -7,10 +7,12 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 import types
 
 import pytest
+from conftest import require_ipywidgets, without_ipython
 from sanitize_check import check_html
 
 from library_hiroba import ui
@@ -237,10 +239,9 @@ def test_uses_ipywidgets_when_available(fake_ipython, monkeypatch):
     assert "hui-card" in output_html(fake_ipython)
 
 
-def test_repr_html_is_used_when_ipython_is_absent():
+def test_repr_html_is_used_when_ipython_is_absent(monkeypatch):
     """PyHiroba には IPython が無いので、静的な HTML の経路が使われる。"""
-    if "IPython" in sys.modules:
-        pytest.skip("IPython のある環境では対象外")
+    without_ipython(monkeypatch)
     html = make_form()._repr_html_()
     assert html.startswith('<div class="hui">')
     assert "hui-submit" in html
@@ -743,3 +744,180 @@ def test_a_number_field_refuses_a_default_that_is_not_a_number():
     # 空（既定）と数はそのまま通る
     assert ui.field("n", kind="number").default == ""
     assert ui.field("n", kind="number", default=5).default == 5
+
+
+# --- 2026-09 の監査で見つかったもの（本物の ipywidgets を相手にする）----------
+
+
+def real_form(monkeypatch, handler, *fields, **kwargs):
+    """本物の ipywidgets でフォームを出し、(入力欄, ボタン, 出力欄) を返す。
+
+    手書きの代役では、押下から表示までの本当の経路（別スレッド・Output への
+    書き込み・容器に入れたときの取りこぼし）が再現できない。
+    """
+    widgets = require_ipywidgets()
+    import IPython.display as module
+
+    caught: list = []
+
+    def display(*objects, **options):
+        if options.get("raw"):
+            return
+        for obj in objects:
+            if hasattr(obj, "_ipython_display_"):
+                obj._ipython_display_()
+            else:
+                caught.append(obj)
+
+    monkeypatch.setattr(module, "display", display)
+    form = kwargs.pop("form", None) or ui.form(handler, *fields, **kwargs)
+    (kwargs.pop("container", None) or form)._ipython_display_()
+    box = next(c for c in caught if isinstance(c, widgets.VBox))
+    children = list(box.children)
+    return (
+        next(c for c in children if isinstance(c, (widgets.Text, widgets.Textarea))),
+        next(c for c in children if isinstance(c, widgets.Button)),
+        next(c for c in children if isinstance(c, widgets.Output)),
+        caught,
+    )
+
+
+def seen(output) -> list[str]:
+    """Output に入っているものを、文字だけにして並べる。"""
+    texts = []
+    for item in output.outputs:
+        raw = str(item.get("data", {}).get("text/html", item.get("text", "")))
+        raw = re.sub(r"<style>.*?</style>", "", raw, flags=re.S)
+        texts.append(" ".join(re.sub(r"<[^>]+>", " ", raw).split()))
+    return texts
+
+
+def test_a_form_inside_a_container_is_still_registered():
+    """容器に入れても、本体から引き当てられること（H-1・PyHiroba 側）。
+
+    登録が ``_repr_html_`` にあったため、``ui.stack(card, form)`` では
+    ``Container.fragment()`` が子の ``fragment()`` を呼んで登録を飛ばし、
+    ``get_form()`` が None を返していた。本体の worker は None なら黙って戻るので、
+    ボタンは描かれているのに押しても何も起きなかった。
+    """
+    form = make_form()
+    page = ui.stack(ui.card("説明", "下に入れてね"), form)
+    assert f'data-hui-submit="{form.form_id}"' in page._repr_html_()
+    assert ui.get_form(form.form_id) is form, "容器に入れると引き当てられません"
+
+
+def test_a_form_inside_a_container_becomes_a_real_widget(monkeypatch):
+    """容器に入れても Colab では ipywidgets として出ること（H-1・Colab 側）。
+
+    1枚の HTML にまとめると、JavaScript の無いボタンが描かれるだけになる。
+    """
+    form = make_form()
+    field, button, output, caught = real_form(
+        monkeypatch, None, form=form, container=ui.stack(ui.card("説明", "…"), form)
+    )
+    assert any(type(c).__name__ == "Card" for c in caught), "容器の中身が出ていません"
+    field.value = "やま"
+    button.click()
+    settle()
+    assert seen(output), "押しても何も起きませんでした"
+
+
+def test_a_container_without_a_form_is_still_one_html(monkeypatch):
+    """フォームが無い容器は、これまでどおり HTML 1枚で出ること（H-1）。"""
+    require_ipywidgets()
+    import IPython.display as module
+
+    caught: list = []
+    monkeypatch.setattr(module, "display", lambda *a, **k: caught.append((a, k)))
+    ui.stack(ui.card("あ"), ui.card("い"))._ipython_display_()
+    assert len(caught) == 1
+    bundle, options = caught[0]
+    assert options.get("raw") and "hui-stack" in bundle[0]["text/html"]
+
+
+def test_an_older_submission_does_not_overwrite_a_newer_answer(monkeypatch):
+    """2回押したとき、遅い1回目が新しい答えを上書きしないこと（H-3）。
+
+    押下ごとに別スレッドが立ち、古い実行は止められない。遅い1回目が後から
+    返ると、**新しい質問の下に前の質問の答えが残る**。生徒には取り違えに見える。
+    """
+
+    async def handler(q):
+        await asyncio.sleep(0.6 if q == "おそい" else 0.0)
+        return ui.card("答え", f"「{q}」への答え")
+
+    async def drive():
+        # **ループが回っている状態で押す。** ここを素のまま押すと
+        # display_result は asyncio.run を選び、押下が直列化されて重ならない
+        # （重ならなければ、この不具合は起きないので検査にならない）
+        field, button, output, _ = real_form(monkeypatch, handler, ui.field("q"))
+        field.value = "おそい"
+        button.click()
+        await asyncio.sleep(0.05)
+        field.value = "はやい"
+        button.click()
+        await asyncio.sleep(1.2)
+        return seen(output)
+
+    assert asyncio.run(drive()) == ["答え 「はやい」への答え"]
+
+
+def test_a_stream_that_says_nothing_does_not_leave_thinking_on_screen(monkeypatch):
+    """1つも出さずに終わったとき、そう言うこと（M-3）。
+
+    「考え中」が出たまま残る／pending=None だと画面が何も変わらない。
+    どちらも故障と見分けが付かない。
+    """
+
+    async def nothing(q):
+        if False:  # pragma: no cover — 1つも yield しない形を作るため
+            yield
+        return
+
+    for pending in (ui.thinking(), None):
+        _field, button, output, _ = real_form(
+            monkeypatch, nothing, ui.field("q"), pending=pending
+        )
+        button.click()
+        settle()
+        assert seen(output), "画面が何も変わりません"
+        assert "考え中" not in " ".join(seen(output)), f"考え中が残っています: {seen(output)}"
+        assert "返ってきませんでした" in " ".join(seen(output))
+
+
+def test_a_generator_handler_without_async_still_works(monkeypatch):
+    """``yield`` で書いて ``async`` を付け忘れても動くこと（L-2）。"""
+
+    def steps(q):
+        yield ui.card("答え", q)
+
+    field, button, output, _ = real_form(monkeypatch, steps, ui.field("q"))
+    field.value = "やま"
+    button.click()
+    settle()
+    assert seen(output) == ["答え やま"], f"実際: {seen(output)}"
+
+
+def test_an_empty_number_field_behaves_the_same_in_both_paths(monkeypatch):
+    """数の欄を触らずに送ると、両環境で同じことが起きること（M-6）。
+
+    Colab は FloatText が空を持てないため 0 として黙って進み、PyHiroba は
+    「数を入力してください」で止まっていた。同じコードの結果が環境で変わる。
+    """
+    field_spec = ui.field("n", label="点数", kind="number")
+    with pytest.raises(ValueError, match="数を入力してください"):
+        ui.form(lambda n: n, field_spec).submit(n="")
+
+    field, button, output, _ = real_form(monkeypatch, lambda n: ui.card("受けた", repr(n)), field_spec)
+    assert field.value == "", "Colab 側の初期値が空ではありません"
+    button.click()
+    settle()
+    shown = " ".join(seen(output))
+    assert "数を入力してください" in shown, f"実際: {seen(output)}"
+    # traceback ではなく、PyHiroba と同じ読める文言で出すこと。traceback にも
+    # 同じ文が含まれるので、そこを見ないと「出ている」と誤判定する
+    assert "Traceback" not in shown, f"traceback が出ています: {seen(output)}"
+    field.value = "90"
+    button.click()
+    settle()
+    assert seen(output) == ["受けた 90.0"], f"実際: {seen(output)}"

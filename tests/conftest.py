@@ -30,6 +30,32 @@ def require_torch():
     return pytest.importorskip("torch")
 
 
+def require_ipywidgets():
+    """ipywidgets を要求する。手元では無ければ飛ばし、CI では落とす。
+
+    Colab 経路（フォームの表示と押下）の見張りは ipywidgets が無いと動かない。
+    この経路は**これまで手書きの代役でしか試しておらず**、そのあいだに
+    「押しても何も起きない」が3回出た（うち1回は容器に入れたときの取りこぼし）。
+    本物を相手にする検査を CI で必ず回すため、``dev`` に入れてある。
+    """
+    if os.environ.get("HIROBA_REQUIRE_AI") == "1":
+        import ipywidgets  # noqa: F401
+
+        return sys.modules["ipywidgets"]
+    return pytest.importorskip("ipywidgets")
+
+
+def without_ipython(monkeypatch) -> None:
+    """IPython が無い環境（PyHiroba）にする。
+
+    ``"IPython" in sys.modules`` を見て skip すると、ipywidgets（ipython を
+    連れてくる）を入れた環境では**その検査がまるごと走らなくなる**。
+    隠せば、どちらの環境でも同じ検査ができる。
+    """
+    for name in ("IPython", "IPython.display"):
+        monkeypatch.setitem(sys.modules, name, None)
+
+
 def has_rule(html: str, selector: str) -> bool:
     """CSS に selector の規則が含まれるか。
 

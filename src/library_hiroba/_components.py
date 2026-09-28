@@ -13,6 +13,7 @@ from typing import ClassVar, Union
 
 from ._core import (
     Container,
+    HasValues,
     Item,
     Stack,
     Widget,
@@ -23,12 +24,13 @@ from ._core import (
     esc_attr,
     shown,
     unique_name,
+    value_html,
 )
 
 Number = Union[int, float]
 
 
-class Card(Widget):
+class Card(HasValues):
     css_keys = ("card",)
 
     def __init__(
@@ -43,21 +45,24 @@ class Card(Widget):
         self.icon = icon
         self.footer = footer
 
+    def value_slots(self) -> list[object]:
+        return [self.title, self.body, self.icon, self.footer]
+
     def fragment(self) -> str:
         parts = []
         if shown(self.title):
             icon = (
-                f'<span class="hui-card-icon">{esc(self.icon)}</span>' if shown(self.icon) else ""
+                f'<span class="hui-card-icon">{value_html(self.icon)}</span>' if shown(self.icon) else ""
             )
-            parts.append(f'<div class="hui-card-title">{icon}<span>{esc(self.title)}</span></div>')
+            parts.append(f'<div class="hui-card-title">{icon}<span>{value_html(self.title)}</span></div>')
         if shown(self.body):
-            parts.append(f'<div class="hui-card-body">{esc(self.body)}</div>')
+            parts.append(f'<div class="hui-card-body">{value_html(self.body)}</div>')
         if self.footer is not None:
-            parts.append(f'<div class="hui-card-footer">{esc(self.footer)}</div>')
+            parts.append(f'<div class="hui-card-footer">{value_html(self.footer)}</div>')
         return f'<div class="hui-card">{"".join(parts)}</div>'
 
 
-class Alert(Widget):
+class Alert(HasValues):
     css_keys = ("alert",)
 
     # PyHiroba に合わせ絵文字は使わず、CSS の円形マーク内に文字記号を置く
@@ -84,16 +89,19 @@ class Alert(Widget):
         self.kind = kind
         self.title = title
 
+    def value_slots(self) -> list[object]:
+        return [self.message, self.title]
+
     def fragment(self) -> str:
         kind_class = "" if self.kind == "info" else f" hui-alert-{self.kind}"
         title = (
-            f'<div class="hui-alert-title">{esc(self.title)}</div>' if shown(self.title) else ""
+            f'<div class="hui-alert-title">{value_html(self.title)}</div>' if shown(self.title) else ""
         )
         return (
             f'<div class="hui-alert{kind_class}">'
             f'<span class="hui-alert-icon" aria-hidden="true">{self.MARKS[self.kind]}</span>'
             f'<span class="hui-vh">{self.SPOKEN[self.kind]}：</span>'
-            f"<div>{title}<div>{esc(self.message)}</div></div>"
+            f"<div>{title}<div>{value_html(self.message)}</div></div>"
             f"</div>"
         )
 
@@ -154,17 +162,20 @@ class Quiz(Widget):
         )
 
 
-class Reveal(Widget):
+class Reveal(HasValues):
     css_keys = ("reveal",)
 
     def __init__(self, content: object, summary: object = "答えを見る"):
         self.content = content
         self.summary = summary
 
+    def value_slots(self) -> list[object]:
+        return [self.content, self.summary]
+
     def fragment(self) -> str:
         return (
-            f'<details class="hui-reveal"><summary>{esc(self.summary)}</summary>'
-            f'<div class="hui-reveal-body">{esc(self.content)}</div></details>'
+            f'<details class="hui-reveal"><summary>{value_html(self.summary)}</summary>'
+            f'<div class="hui-reveal-body">{value_html(self.content)}</div></details>'
         )
 
 
@@ -207,7 +218,7 @@ class Progress(Widget):
         )
 
 
-class Stat(Widget):
+class Stat(HasValues):
     css_keys = ("stat",)
 
     def __init__(
@@ -222,15 +233,18 @@ class Stat(Widget):
         self.unit = unit
         self.icon = icon
 
+    def value_slots(self) -> list[object]:
+        return [self.label, self.value, self.unit, self.icon]
+
     def fragment(self) -> str:
-        icon = f"{esc(self.icon)} " if shown(self.icon) else ""
+        icon = f"{value_html(self.icon)} " if shown(self.icon) else ""
         unit = (
-            f'<span class="hui-stat-unit">{esc(self.unit)}</span>' if shown(self.unit) else ""
+            f'<span class="hui-stat-unit">{value_html(self.unit)}</span>' if shown(self.unit) else ""
         )
         return (
             f'<div class="hui-stat">'
-            f'<span class="hui-stat-label">{icon}{esc(self.label)}</span>'
-            f'<span class="hui-stat-value">{esc(self.value)}{unit}</span>'
+            f'<span class="hui-stat-label">{icon}{value_html(self.label)}</span>'
+            f'<span class="hui-stat-value">{value_html(self.value)}{unit}</span>'
             f"</div>"
         )
 
@@ -264,7 +278,7 @@ class Columns(Container):
         return f'<div class="hui-cols" style="gap: {self.gap};">{"".join(cols)}</div>'
 
 
-class Badge(Widget):
+class Badge(HasValues):
     css_keys = ("badge",)
 
     COLORS = ("blue", "green", "red", "amber", "gray")
@@ -277,9 +291,12 @@ class Badge(Widget):
         self.text = text
         self.color = color
 
+    def value_slots(self) -> list[object]:
+        return [self.text]
+
     def fragment(self) -> str:
         color_class = "" if self.color == "gray" else f" hui-badge-{self.color}"
-        return f'<span class="hui-badge{color_class}">{esc(self.text)}</span>'
+        return f'<span class="hui-badge{color_class}">{value_html(self.text)}</span>'
 
 
 class Table(Widget):
@@ -299,6 +316,13 @@ class Table(Widget):
         rows = list(data)
         # headers は下で何度もなぞる。生成器のまま受け取ると最初の1行で尽きて、
         # 2行目以降が黙って空欄になる（表示は出るので気付けない）。先に確定させる。
+        if isinstance(headers, str):
+            # list("名前") は ['名','前'] になる。列が1文字ずつに割れ、辞書の行は
+            # どのキーにも一致しないので**中身が空欄のまま**表が出る。例外にならない
+            raise ValueError(
+                f"headers には列名のリストを渡してください（指定値: {headers!r}）。"
+                f'文字列をそのまま渡すと1文字ずつ別の列になります（1列なら ["{headers}"]）。'
+            )
         if headers is not None:
             headers = list(headers)
         if not rows:
@@ -313,6 +337,15 @@ class Table(Widget):
             raise ValueError(
                 "行が文字列になっています。1行は値の一覧です（例: [[1, 2], [3, 4]]）。"
             )
+        # 1行は「値の一覧」。数値をそのまま並べると 'int' object is not iterable と
+        # いう英語だけが出て、どこが悪いのか分からない
+        if dict_rows == 0:
+            flat = [r for r in rows if not isinstance(r, (list, tuple))]
+            if flat:
+                raise ValueError(
+                    f"行が値そのものになっています（指定値: {flat[0]!r}）。"
+                    "1行は値の一覧です。1列なら [[90], [85]] のように包んでください。"
+                )
 
         if dict_rows:
             if headers is None:
@@ -614,7 +647,7 @@ def stack(*items, gap="12px") -> Stack:
     return Stack(as_items(items), gap=gap)
 
 
-class Thinking(Widget):
+class Thinking(HasValues):
     """「考え中」を点の動きで伝える部品。
 
     答えが出るまで画面が変わらないと、押せていないと思われる。JavaScript は
@@ -626,8 +659,11 @@ class Thinking(Widget):
     def __init__(self, text: object = "考え中"):
         self.text = text
 
+    def value_slots(self) -> list[object]:
+        return [self.text]
+
     def fragment(self) -> str:
-        label = f"<span>{esc(self.text)}</span>" if shown(self.text) else ""
+        label = f"<span>{value_html(self.text)}</span>" if shown(self.text) else ""
         # 点は目で見るためのもの。読み上げには言葉だけ伝える
         return (
             f'<div class="hui-thinking" role="status">{label}'
@@ -713,6 +749,21 @@ class Conversation(Widget):
                 f"role は {list(Chat.ROLES)} のいずれかにしてください（指定値: {role!r}）"
             )
         self._messages.append({"role": role, "content": content})
+        return self
+
+    def reserve_reply(self) -> int:
+        """あとから中身を入れる「相手の発言」の席を取り、その位置を返す。
+
+        往復が重なったときに、答えが別の質問の下に付くのを防ぐための口。
+        質問を足した直後にここで席を取っておけば、答えが遅れて届いても
+        自分の質問のすぐ下に入る。足すだけなので、先に取った席の位置は動かない。
+        """
+        self._messages.append({"role": "assistant", "content": ""})
+        return len(self._messages) - 1
+
+    def fill_reply(self, at: int, content: object) -> Conversation:
+        """:meth:`reserve_reply` で取った席に中身を入れる。"""
+        self._messages[at]["content"] = content
         return self
 
     def say(self, content: object) -> Conversation:

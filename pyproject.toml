@@ -48,7 +48,9 @@ Changelog = "https://github.com/funakoshi-takehiro/ui-hiroba/releases"
 #     （qwen3_06 / qwen3_17 の Qwen3 は 4.51 以降。厳しいほうに合わせる）
 #   torch>=2.0 … transformers 4.51 自身が要求する下限
 ai = ["transformers>=4.57", "torch>=2.0"]
-dev = ["pytest", "ruff>=0.16", "build", "twine", "nbformat"]
+# ipywidgets は Colab 経路の検査に要る（本物を相手にしないと、手書きの代役が
+# 通ってしまう。実際それで「押しても何も起きない」を3回見逃した）
+dev = ["pytest", "ruff>=0.16", "build", "twine", "nbformat", "ipywidgets"]
 gallery = ["playwright"]
 
 [tool.hatch.version]

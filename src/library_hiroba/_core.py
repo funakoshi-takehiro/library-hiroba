@@ -39,6 +39,14 @@ def css_length(value: object, argument: str) -> str:
             f"{argument} には長さを指定してください（例: '12px'、'1.5rem'、'0'）。"
             f"指定値: {value!r}"
         )
+    # 0 以外は単位が要る。CSS は "gap: 8" のような宣言を丸ごと捨てるので、
+    # 例外にもならないまま**間隔だけが消える**。単位を書き忘れただけなので、そう言う
+    if _LENGTH.match(text).group(3) is None and float(text) != 0:
+        raise ValueError(
+            f"{argument} に単位が付いていません（指定値: {value!r}）。"
+            f"'{text}px' のように書いてください。単位が無いと、"
+            "ブラウザはこの指定ごと無かったことにします。"
+        )
     return text
 
 
@@ -119,6 +127,13 @@ class Widget:
                 parts.append(block)
         return "<style>" + "\n".join(parts) + "</style>"
 
+    def needs_ipywidgets(self) -> bool:
+        """HTML だけでは動かない部品かどうか（既定は HTML だけで動く）。
+
+        :class:`Container` がこれを見て、Colab での出し方を変える。
+        """
+        return False
+
     def _repr_html_(self) -> str:
         # <style> は必ずルートの <div> の内側に置く。断片 HTML の先頭に置くと、
         # ブラウザの HTML パーサがこれを body の外（head 相当の位置）へ移動させ、
@@ -149,6 +164,44 @@ def as_widget(item: Item) -> Widget:
     return item if isinstance(item, Widget) else Text(item)
 
 
+def value_html(value: object) -> str:
+    """値をそのまま置ける HTML にする。部品なら描き、それ以外はエスケープする。
+
+    ``ui.card("結果", ui.table(rows))`` のように、値の場所に部品を入れるのは
+    自然な書き方（``ui.chat()`` は前からできる）。ここを ``esc(str(value))`` に
+    していると、例外にならないまま画面に ``<library_hiroba.Table>`` という
+    文字が出る。気付くのは授業で映したときになる。
+    """
+    return value.fragment() if isinstance(value, Widget) else esc(value)
+
+
+class HasValues(Widget):
+    """値の場所に部品を入れられる部品。
+
+    中の部品が要る CSS まで集める。集めないと、描けても配色も枠も無い
+    素の見た目になる（``<style>`` に規則が入らないため）。
+    """
+
+    def value_slots(self) -> list[object]:
+        """部品が入りうる値を並べて返す（各部品が実装する）。"""
+        raise NotImplementedError
+
+    def _nested(self) -> list[Widget]:
+        return [v for v in self.value_slots() if isinstance(v, Widget)]
+
+    def _iter_css_keys(self) -> list[str]:
+        keys = list(self.css_keys)
+        for child in self._nested():
+            keys.extend(child._iter_css_keys())
+        return keys
+
+    def _iter_extra_css(self) -> list[str]:
+        blocks = super()._iter_extra_css()
+        for child in self._nested():
+            blocks.extend(child._iter_extra_css())
+        return blocks
+
+
 def as_items(items: Sequence[Item]) -> Sequence[Item]:
     """可変長引数で受けた並びを、部品の並びとして解釈する。
 
@@ -161,8 +214,15 @@ def as_items(items: Sequence[Item]) -> Sequence[Item]:
     リストかタプルが1つだけ来たら、その中身を並びとして扱う。いまその書き方で
     出ていたのは壊れた表示だけなので、動いていたものは何も変わらない。
     """
-    if len(items) == 1 and isinstance(items[0], (list, tuple)):
-        return list(items[0])
+    if len(items) == 1:
+        only = items[0]
+        if isinstance(only, (list, tuple)):
+            return list(only)
+        # ジェネレータ内包表記や map も、書く人から見れば「部品の並び」。
+        # 開かないと str() されて <generator object …> が画面に出る。
+        # 文字列と辞書は除く（1文字ずつ・キーだけ、という別の意味になる）
+        if not isinstance(only, (Widget, str, bytes, dict)) and hasattr(only, "__iter__"):
+            return list(only)
     return items
 
 
@@ -185,6 +245,27 @@ class Container(Widget):
         for child in self.children:
             blocks.extend(child._iter_extra_css())
         return blocks
+
+    def needs_ipywidgets(self) -> bool:
+        return any(child.needs_ipywidgets() for child in self.children)
+
+    def _ipython_display_(self) -> None:
+        """Colab などでの表示。
+
+        ふつうは HTML を1枚にまとめて出す。ただし**中にフォームがあるときは、
+        子を1つずつ出す**。まとめてしまうと JavaScript の無いボタンが描かれ、
+        押しても何も起きないフォームになる（Colab では ipywidgets の部品として
+        出さなければ動かない）。そのぶん容器の間隔や横並びは失われるが、
+        動かないフォームを出すより良い。
+        """
+        from IPython.display import display
+
+        if not self.needs_ipywidgets():
+            # いつもの HTML 経路。formatter が作るものと同じ物を自分で出す
+            display({"text/html": self._repr_html_(), "text/plain": repr(self)}, raw=True)
+            return
+        for child in self.children:
+            display(child)
 
 
 class Stack(Container):

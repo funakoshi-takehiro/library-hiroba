@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 import pytest
-from conftest import has_rule
+from conftest import has_rule, without_ipython
 from sanitize_check import check_html
 
 import library_hiroba
@@ -250,13 +250,8 @@ def test_html_css_duplicate_unscoped_blocks_are_deduped():
 # --- show -------------------------------------------------------------------
 
 
-def test_show_returns_widget_without_ipython():
-    try:
-        import IPython  # noqa: F401
-
-        pytest.skip("IPython がある環境では display() に委譲されるため対象外")
-    except ImportError:
-        pass
+def test_show_returns_widget_without_ipython(monkeypatch):
+    without_ipython(monkeypatch)
     single = ui.show(ui.card("a"))
     assert isinstance(single, ui.Widget)
     multi = ui.show(ui.card("a"), "テキスト")
@@ -594,6 +589,28 @@ def test_the_font_can_be_turned_on_for_colab():
 # --- 監査で見つかった「黙って間違う」書き方 ---------------------------------
 
 
+def rendered(factory, *args, **kwargs) -> str:
+    """部品を作って、表示される HTML を返す。
+
+    ``ui.show()`` は IPython があると**その場で表示して None を返す**ので、
+    返り値だけを見ると環境によってテストが通らない。表示された物を受け取る。
+    """
+    try:
+        import IPython.display as module
+    except ImportError:
+        return factory(*args, **kwargs)._repr_html_()
+    if module is None:  # without_ipython で隠された状態
+        return factory(*args, **kwargs)._repr_html_()
+    caught: list = []
+    original = module.display
+    module.display = lambda *shown, **_: caught.extend(shown)
+    try:
+        result = factory(*args, **kwargs)
+    finally:
+        module.display = original
+    return (result if result is not None else caught[-1])._repr_html_()
+
+
 @pytest.mark.parametrize("factory", ["columns", "stack", "show"])
 def test_a_list_of_parts_is_read_as_the_parts(factory):
     """``ui.columns([a, b])`` が部品2つとして読まれること（B-1）。
@@ -602,8 +619,7 @@ def test_a_list_of_parts_is_read_as_the_parts(factory):
     間違い。以前は可変長引数にリスト1個として届き、例外にもならずに画面へ
     ``[<library_hiroba.Card>, <library_hiroba.Card>]`` という文字が出ていた。
     """
-    widget = getattr(ui, factory)([ui.card("あ"), ui.card("い")])
-    html = widget._repr_html_()
+    html = rendered(getattr(ui, factory), [ui.card("あ"), ui.card("い")])
     assert "library_hiroba.Card" not in html, "リストの文字列表現が画面に出ています"
     assert "あ" in html and "い" in html
 
@@ -657,3 +673,83 @@ def test_ordinary_numbers_are_untouched():
     """直したことで、普通の値の見え方が変わっていないこと（B-3, B-4）。"""
     assert 'aria-valuenow="70"' in ui.progress(7, 10)._repr_html_()
     assert "flex: 2 1 0" in ui.columns(ui.card("あ"), ui.card("い"), widths=[2, 1])._repr_html_()
+
+
+# --- 2026-09 の監査で見つかったもの ------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda inner: ui.card("結果", inner),
+        lambda inner: ui.reveal(inner, summary="答えを見る"),
+        lambda inner: ui.alert(inner),
+        lambda inner: ui.stat("順位", inner),
+        lambda inner: ui.badge(inner),
+        lambda inner: ui.thinking(inner),
+    ],
+)
+def test_a_part_put_in_a_value_slot_is_drawn(build):
+    """値の場所に部品を入れたら、描かれること（M-1）。
+
+    以前は ``esc(str(value))`` を通って ``<library_hiroba.Table>`` という文字が
+    画面に出ていた。``ui.chat()`` は前から部品を受け付けるので、一貫していない。
+    """
+    html = build(ui.table([{"名前": "佐藤"}]))._repr_html_()
+    assert "library_hiroba." not in html, "部品の repr が画面に出ています"
+    assert "佐藤" in html
+    assert has_rule(html, ".hui-table"), "入れ子の部品の CSS が出ていません"
+
+
+def test_a_value_slot_still_escapes_plain_text():
+    """部品でない値は、これまでどおりエスケープされること（M-1）。"""
+    html = ui.card("<b>題</b>", "1行\n2行")._repr_html_()
+    assert "&lt;b&gt;" in html and "<b>題" not in html
+    assert "<br>" in html, "改行が <br> になりません"
+
+
+def test_headers_given_as_a_string_is_refused():
+    """``headers`` に文字列を渡したら止まること（H-2）。
+
+    ``list("名前")`` は ['名','前'] になり、列が1文字ずつに割れる。辞書の行は
+    どのキーにも一致しないので、**中身が空欄のまま**表が出ていた。
+    """
+    with pytest.raises(ValueError, match="列名のリスト"):
+        ui.table([{"名前": "佐藤", "点数": 90}], headers="名前")
+    # 正しい書き方は通る
+    assert ui.table([{"名前": "佐藤"}], headers=["名前"]).rows == [["佐藤"]]
+
+
+def test_rows_given_as_bare_values_say_what_to_do():
+    """行に値そのものを並べたとき、読める文言で止まること（M-7）。
+
+    以前は ``'int' object is not iterable`` という英語だけが出ていた。
+    文字列のリストには案内があったので、数値だけ取り残されていた。
+    """
+    with pytest.raises(ValueError, match="値そのもの"):
+        ui.table([90, 85, 78], headers=["点数"])
+    assert ui.table([[90], [85]], headers=["点数"]).rows == [[90], [85]]
+    # タプルの行はこれまでどおり通る
+    assert ui.table([(1, 2), (3, 4)]).rows == [[1, 2], [3, 4]]
+
+
+@pytest.mark.parametrize("factory", ["columns", "stack", "show"])
+def test_a_generator_of_parts_is_read_as_the_parts(factory):
+    """ジェネレータ内包表記でも部品の並びとして読まれること（M-2）。"""
+    html = rendered(getattr(ui, factory), (ui.badge(str(n)) for n in range(3)))
+    assert "generator object" not in html, "ジェネレータの repr が画面に出ています"
+    assert ">0<" in html and ">2<" in html
+
+
+def test_a_length_without_a_unit_is_refused():
+    """単位を書き忘れた長さを止めること（L-1）。
+
+    CSS は ``gap: 8`` を宣言ごと捨てるので、例外にならないまま間隔だけが消える。
+    """
+    with pytest.raises(ValueError, match="単位"):
+        ui.columns(ui.card("あ"), ui.card("い"), gap=8)
+    with pytest.raises(ValueError, match="単位"):
+        ui.stack(ui.card("あ"), gap="1.5")
+    # 0 は単位が要らない。単位つきはこれまでどおり
+    for good in ("0", 0, "12px", "1.5rem", "50%"):
+        assert ui.stack(ui.card("あ"), gap=good)
