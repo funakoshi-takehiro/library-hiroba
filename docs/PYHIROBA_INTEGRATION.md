@@ -212,9 +212,27 @@ optimum-cli export onnx --model llm-jp/llm-jp-3-440m-instruct3 --task text-gener
 
 変換した重みは本体から取得できる場所に置いてください。この作業をしない限り、`MODELS` に足しても**ブラウザでは読み込みに失敗します**。
 
-#### LLM-jp の現状（2026-08 時点）
+#### LLM-jp の現状（2026-09-28 調べ・対応は保留中）
 
-`llm-jp-3` で ONNX 版が公開されているのは **150M だけ**です（2026-09 に全 author を調べ直しました。instruct2 と instruct3 の2つがあります）。440M・980M・1.8B・3.7B・13B、および新しい `llm-jp-4`（8B・32B・33B）には変換版がありません。そのため、**上の変換を自分で行わない限り、LLM-jp を 150M より増やすことはできません**。
+`llm-jp-3` で ONNX 版が公開されているのは **150M だけ**です（全 author を横断して確認。instruct2 と instruct3 の2つ）。440M・980M・1.8B・3.7B・13B、および `llm-jp-4` / `llm-jp-4.1`（8B・32B・33B）には変換版がありません。そのため、**上の変換を自分で行わない限り、LLM-jp を 150M より増やすことはできません**。
+
+`llm-jp-4.1` が 2026-09-28 に出ましたが、**ONNX が無いうえ、無料 Colab の GPU にも載りません**。重みを実測した結果は次のとおり（T4 は 15GB）。
+
+| モデル | 重み | 無料 Colab | ONNX |
+| --- | --- | --- | --- |
+| `llm-jp-4.1-8b-thinking` | 17.2GB | ✗ 載らない | ✗ |
+| `llm-jp-4-8b-instruct` | 17.2GB | ✗ 載らない | ✗ |
+| `llm-jp-4.1-33b` / `32b-a3b` | 64GB 以上 | ✗ | ✗ |
+| `llm-jp-3.1-1.8b-instruct4` | 3.7GB | ✓ | ✗ |
+| `llm-jp-3-3.7b-instruct3` | 7.6GB | ✓ | ✗ |
+
+**「両方で動くものだけを載せる」という方針のままでは、LLM-jp は増やせません。** 増やすには次のどれかを選ぶことになります。**2026-09-29 時点で保留**とし、決めていません。
+
+1. `llm-jp-3.1-1.8b-instruct4` を **Colab 限定**で載せる（方針の見直しが要る）
+2. **4bit 量子化**して 8B を Colab で動かす（17.2GB → 約 4.5GB で T4 に載る。`bitsandbytes` が依存に増え、やはり Colab 限定）
+3. **自分で ONNX に変換して配布する**（上の `optimum-cli`。8B の変換と置き場所が要る）
+
+日本語の質でいえば 2 がいちばん有望ですが、依存が増えて Colab 限定になります。
 
 Qwen 側は状況が進んでおり、0.7.0 で `qwen35_08`（Qwen3.5 0.8B・469MB）と `qwen3_4b`（Qwen3 4B・2.9GB）を足しました。詳しくは [`PYHIROBA_MODELS_REQUEST.md`](PYHIROBA_MODELS_REQUEST.md) に。なお **Qwen3 8B は ONNX Runtime GenAI 形式のみ**で transformers.js では読めず、**Qwen3.5 の 2B / 4B は画像つき版だけ**です。
 
