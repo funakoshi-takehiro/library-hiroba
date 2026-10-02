@@ -111,6 +111,9 @@ UI_MAY_IMPORT = {
     "asyncio",
     "collections",
     "html",
+    # 入れ替えたのに読み込み直していないことに気付くため（importlib.metadata）。
+    # 配布情報が無ければ何も言わないので、同梱の PyHiroba では働かない
+    "importlib",
     "inspect",
     "keyword",
     "re",

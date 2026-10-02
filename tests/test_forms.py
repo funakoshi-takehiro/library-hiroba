@@ -997,3 +997,59 @@ def test_the_colab_look_survives_without_the_hui_class():
             continue
         wanted = f"var({name},{_minify(value.strip())})"
         assert wanted in css, f"{name} の控えが .hui の値と違います（{wanted} を期待）"
+
+
+def test_a_stale_module_says_so_on_the_form(monkeypatch):
+    """入れ替えたのに読み込み直していないとき、画面でそう言うこと。
+
+    ``%pip install -U`` はディスク上を新しくするが、読み込み済みの module は
+    差し替わらない。CSS も import 時に組み上がって固まるので、画面は古いまま
+    変わらない。**入れ直しても直らない**ので「ライブラリが直っていない」と
+    受け取られる。実際にそう言われたのが3回。見ている場所で伝える。
+    """
+    import importlib.metadata as meta
+
+    # 「ディスク上に別の版が入っている」状態を作る。stale_module を差し替えると
+    # 本物の文言を確かめられないので、下じきのほうを差し替える
+    monkeypatch.setattr(meta, "version", lambda name: "9.9.9")
+    _field, _button, _output, caught = real_form(
+        monkeypatch, lambda q: q, ui.field("q"), title="テスト"
+    )
+    widgets = require_ipywidgets()
+    box = next(c for c in caught if isinstance(c, widgets.VBox))
+    shown = " ".join(c.value for c in box.children if isinstance(c, widgets.HTML))
+    assert "9.9.9" in shown, "入れ替えの知らせが出ていません"
+    assert "再起動" in shown, "どうすればよいかが書かれていません"
+
+
+def test_the_stale_notice_names_both_versions_and_what_to_do(monkeypatch):
+    """知らせに、両方の版と「再起動」が入っていること。"""
+    import importlib.metadata as meta
+
+    import library_hiroba
+    from library_hiroba._forms import stale_module
+
+    monkeypatch.setattr(meta, "version", lambda name: "9.9.9")
+    message = stale_module()
+    assert library_hiroba.__version__ in message and "9.9.9" in message
+    assert "再起動" in message
+
+
+def test_nothing_is_said_when_the_versions_agree():
+    """版が合っているときは何も言わないこと。"""
+    from library_hiroba._forms import stale_module
+
+    assert stale_module() == ""
+
+
+def test_nothing_is_said_when_there_is_no_distribution(monkeypatch):
+    """PyHiroba は同梱で配布情報を持たない。そこでは何も言わないこと。"""
+    import importlib.metadata as meta
+
+    from library_hiroba._forms import stale_module
+
+    def missing(name):
+        raise meta.PackageNotFoundError(name)
+
+    monkeypatch.setattr(meta, "version", missing)
+    assert stale_module() == ""

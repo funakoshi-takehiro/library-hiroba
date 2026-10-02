@@ -99,6 +99,37 @@ def _resolve_pending(pending: object) -> object:
     return thinking(pending)
 
 
+def stale_module() -> str:
+    """入れ替えたのに読み込み直していないとき、その旨を返す。空なら問題なし。
+
+    ``%pip install -U`` はディスク上を新しくするが、**読み込み済みの module は
+    差し替わらない**。CSS も表も import した時点で組み上がって固まるため、
+    画面は古いまま変わらない。入れ直しても直らないので、たいてい
+    「ライブラリが直っていない」と受け取られる。実際そう言われたのが3回。
+
+    ここで気付けるのは、``ui.form()`` が**入れ替えたあとに呼ばれる**ため。
+    import の時点では、まだ食い違いが生まれていない。
+
+    PyHiroba は同梱なので配布情報を持たない。その場合は何も言わない。
+    """
+    from importlib.metadata import PackageNotFoundError, version
+
+    from . import __version__
+
+    try:
+        on_disk = version("library-hiroba")
+    except PackageNotFoundError:
+        return ""
+    if on_disk == __version__:
+        return ""
+    return (
+        f"いま動いているのは {__version__} ですが、{on_disk} が入っています。"
+        "入れ替えても、読み込み済みのものは差し替わりません。"
+        "メニューの「ランタイム」→「セッションを再起動する」を実行してから、"
+        "もう一度このセルを動かしてください。"
+    )
+
+
 def get_form(form_id: str) -> Form | None:
     """表示済みのフォームを ID で取り出す。見つからなければ ``None``。
 
@@ -549,8 +580,16 @@ class Form(Widget):
         # ipywidgets の部品には .hui-... の CSS が付いてこないので、ここで一度だけ出す
         # （HTML を出さない経路なので、部品側の <style> も出ない）
         style = widgets.HTML(self._widget_style_block())
+        # 入れ替えたのに再起動していないと、ここから下の見た目はぜんぶ古い版の
+        # ものになる。見えない形で起きるので、見ている場所で言う
+        stale = stale_module()
+        notice = []
+        if stale:
+            from ._components import alert
+
+            notice = [widgets.HTML(alert(stale, kind="warning")._repr_html_())]
         header = [widgets.HTML(f"<b>{esc(self.title)}</b>")] if self.title is not None else []
-        box = widgets.VBox([style, *header, *controls.values(), button, output])
+        box = widgets.VBox([style, *notice, *header, *controls.values(), button, output])
         # 配色・角丸・書体は base_css が .hui に載せている。ここを付け忘れると
         # var(--hui-accent) がどこにも無い変数になり、色も枠も無い素の見た目に戻る
         _add_class(box, "hui")
