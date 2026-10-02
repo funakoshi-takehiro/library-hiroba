@@ -566,6 +566,12 @@ COMPONENT_CSS = {
     # !important は、ipywidgets 自身の CSS（.jupyter-button など）に勝つため。
     "widgets": """\
 .hui-wform {
+  /* 書体と文字の大きさも .hui に合わせて書いておく。付いていないとブラウザの
+     既定（16px・既定の書体）に戻り、15px のつもりで組んだ入力欄に文字が収まらない。
+     .hui が付いていれば同じ値なので、見え方は変わらない */
+  font-family: 'Zen Kaku Gothic New', system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.7;
   border: 1px solid var(--hui-line);
   border-radius: var(--hui-radius);
   background: var(--hui-paper);
@@ -669,6 +675,34 @@ COMPONENT_CSS = {
 /* ボタンの幅。VBox は子を横いっぱいに伸ばすので、width: auto では止まらない */
 .hui-wform .hui-wsubmit { align-self: flex-start !important; }""",
 }
+
+def _with_fallbacks(css: str) -> str:
+    """``var(--hui-x)`` に、``.hui`` が無かったときの控えの値を入れる。
+
+    Colab 側（ipywidgets）の見た目は、``.hui`` クラスが箱に付いていることが前提で、
+    付いていないと変数がどこにも無い。すると ``background: var(--hui-paper)`` は
+    無効になって**枠が透明**になり、``color: var(--hui-ink)`` も無効になって文字が
+    黒に戻る。Colab のダークでは暗い地に黒い字が乗り、題名が**背景と同化する**
+    （実測 1.26:1）。クラスの付け忘れは一度やっている（0.4.1）ので、
+    付いていなくても読める値を書いておく。
+
+    控えは ``.hui`` が持っている値そのものを使う。手で書き写すとずれるため、
+    ここで引いて入れる。
+    """
+    import re
+
+    source = "\n".join([_LIGHT_TOKENS, "--hui-radius: 14px;", "--hui-radius-sm: 8px;"])
+    known = dict(re.findall(r"(--hui-[a-z0-9-]+)\s*:\s*([^;]+);", source))
+    return re.sub(
+        r"var\(\s*(--hui-[a-z0-9-]+)\s*\)",
+        lambda m: f"var({m.group(1)}, {known[m.group(1)].strip()})"
+        if m.group(1) in known
+        else m.group(0),
+        css,
+    )
+
+
+COMPONENT_CSS["widgets"] = _with_fallbacks(COMPONENT_CSS["widgets"])
 
 BASE_CSS = _minify(BASE_CSS)
 # 書体の取得だけを外したもの。@import は必ず先頭にあるので、そこだけ落とす。

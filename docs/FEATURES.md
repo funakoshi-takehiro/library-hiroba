@@ -1,4 +1,4 @@
-# library-hiroba の機能一覧（0.8.1）
+# library-hiroba の機能一覧（0.8.2）
 
 **同じコードが Google Colab と PyHiroba（ブラウザの中で動く Python）の両方で動く**、
 という一点を土台にした教育向けライブラリ。入口は `ui` と `ai` の2つ。

@@ -75,7 +75,7 @@ def widget_css() -> str:
     return css
 
 
-def page(our_css: str, dark: bool) -> str:
+def page(our_css: str, dark: bool, hui: bool = True) -> str:
     """ipywidgets が実際に作る組み立て。旧名と新名の両方を付ける（CSS が別名で宣言）。"""
 
     def field(label: str, control: str) -> str:
@@ -92,7 +92,7 @@ def page(our_css: str, dark: bool) -> str:
     )
     body = (
         '<div class="jupyter-widgets widget-box widget-vbox jupyter-widget-box '
-        'jupyter-widget-vbox hui hui-wform" id="form">'
+        f'jupyter-widget-vbox {"hui " if hui else ""}hui-wform" id="form">'
         f"<style>{our_css}</style>"
         '<div class="jupyter-widgets widget-inline-hbox jupyter-widget-inline-hbox '
         'widget-html jupyter-widget-html"><div class="widget-html-content '
@@ -159,8 +159,10 @@ def main() -> int:
         tab = browser.new_page(viewport={"width": 900, "height": 600})
         html_sizes = html_path_sizes(tab)
         print(f"PyHiroba 側（HTML）: 入力欄 {html_sizes['入力欄']}px / ボタン {html_sizes['ボタン']}px\n")
-        for dark in (False, True):
-            tab.set_content(page(our, dark))
+        # 3つめは、箱に .hui が付かなかった場合。変数がどこにも無くなるので、
+        # 控えが効かないと枠が透明になり、題名が暗い地に黒い字で乗る
+        for dark, hui in ((False, True), (True, True), (True, False)):
+            tab.set_content(page(our, dark, hui))
             # 当たっているかを先に確かめる。当たっていないと、ぶつかり自体が
             # 起きないので**何も測らずに「問題なし」**と出る
             alive = tab.evaluate(
@@ -173,7 +175,8 @@ def main() -> int:
                 print(f"★ ipywidgets の CSS が当たっていません（{alive}）。測定できません。")
                 return 1
             found = tab.evaluate(MEASURE)
-            print(f"--- Colab 側（ipywidgets・{'ダーク' if dark else 'ライト'}）---")
+            label = ("ダーク" if dark else "ライト") + ("" if hui else "・.hui 無し")
+            print(f"--- Colab 側（ipywidgets・{label}）---")
             print(json.dumps(found, ensure_ascii=False, indent=2))
             for key in ("選択欄", "入力欄", "複数行"):
                 box = found[key]
@@ -186,6 +189,8 @@ def main() -> int:
             if found["ボタン"]["幅"] > found["ボタン"]["枠の幅"] * 0.8:
                 print("  ★ ボタンが横いっぱいに伸びています")
                 problems += 1
+            # ボタンの 3.87:1 は記録済みの判断（UI 部品の基準 3:1 は満たす。
+            # tests/test_contrast.py と README に書いてある）ので見ない
             ratio = contrast(found["題名"]["色"], found["題名"]["枠の地"])
             if ratio < 4.5:
                 print(f"  ★ 題名が読めません（地との差 {ratio:.2f}:1、4.5:1 が必要）")

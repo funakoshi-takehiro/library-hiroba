@@ -968,4 +968,32 @@ def test_the_title_colour_is_forced_inside_the_form():
     assert ".hui-wform.widget-html-content" in css or ".hui-wform.jupyter-widget-html" in css, (
         "widgets.HTML（題名）の色を上書きする規則がありません"
     )
-    assert "color:var(--hui-ink)!important" in css
+    # 控えの値が入るので、変数名だけで見る（控えの中身は別のテストで確かめる）
+    assert "color:var(--hui-ink," in css or "color:var(--hui-ink)" in css
+
+
+def test_the_colab_look_survives_without_the_hui_class():
+    """``.hui`` が付かなくても読める値になっていること。
+
+    Colab 側の見た目は ``.hui`` が箱に付いていることが前提で、付いていないと
+    ``--hui-*`` がどこにも無い。すると ``background: var(--hui-paper)`` が無効に
+    なって**枠が透明**になり、``color: var(--hui-ink)`` も無効で文字が黒に戻る。
+    Colab のダークでは暗い地に黒い字が乗り、題名が背景と同化する（実測 1.26:1）。
+    クラスの付け忘れは 0.4.1 で一度やっている。
+    """
+    from library_hiroba._css import _LIGHT_TOKENS, COMPONENT_CSS
+
+    bare = re.findall(r"var\(--hui-[a-z0-9-]+\)", COMPONENT_CSS["widgets"])
+    assert not bare, f"控えの値が無い変数があります: {sorted(set(bare))}"
+    # 控えは .hui が持っている値そのものであること（手で書き写すとずれる）。
+    # 値をほどいて比べると --hui-shadow のようにカンマと括弧を含むものを
+    # 取りこぼすので、「この並びが入っているか」で見る
+    from library_hiroba._css import _minify
+
+    known = dict(re.findall(r"(--hui-[a-z0-9-]+)\s*:\s*([^;]+);", _LIGHT_TOKENS))
+    css = COMPONENT_CSS["widgets"]
+    for name, value in known.items():
+        if f"var({name}" not in css:
+            continue
+        wanted = f"var({name},{_minify(value.strip())})"
+        assert wanted in css, f"{name} の控えが .hui の値と違います（{wanted} を期待）"
