@@ -921,3 +921,51 @@ def test_an_empty_number_field_behaves_the_same_in_both_paths(monkeypatch):
     button.click()
     settle()
     assert seen(output) == ["受けた 90.0"], f"実際: {seen(output)}"
+
+
+# --- Colab での見た目（ipywidgets の決め打ちとぶつかる分）---------------------
+
+
+def widgets_css() -> str:
+    """``widgets`` の CSS を、空白を無視して比べられる形にする。"""
+    from library_hiroba._css import COMPONENT_CSS
+
+    return re.sub(r"\s+", "", COMPONENT_CSS["widgets"])
+
+
+@pytest.mark.parametrize(
+    ("declaration", "why"),
+    [
+        # セレクタまで含めて見る。height:auto!important だけだと、もとからある
+        # .hui-wsubmit の指定に当たって素通りする（見張りになっていなかった）
+        (
+            '.hui-wfieldtextarea{height:auto!important}',
+            "入力欄の高さ 28px を外さないと、文字の入る高さが 10px しか残らず上下が切れる",
+        ),
+        ("flex:00auto!important", "縦並びにすると ipywidgets の flex:1 1 … が縦に伸び、選択欄が 148px に膨らむ"),
+        ("flex-direction:column!important", "名前を入力欄の上に出さないと、幅 80px の欄で「…」になる"),
+        ("white-space:normal!important", "名前を折り返さないと、長い名前が切れたままになる"),
+        ("align-self:flex-start!important", "VBox は子を横いっぱいに伸ばすので、width:auto では止まらない"),
+    ],
+)
+def test_the_colab_look_neutralises_what_ipywidgets_fixes(declaration, why):
+    """ipywidgets の決め打ちを打ち消す指定が残っていること。
+
+    ここは Colab で開いた人にしか見えず、例外にもならない。実際に描いて測るのは
+    ``tools/check_widget_css.py``（ブラウザが要るので CI では回さない）。
+    こちらは、その打ち消しが消えていないことだけを見張る。
+    """
+    assert declaration in widgets_css(), why
+
+
+def test_the_title_colour_is_forced_inside_the_form():
+    """題名の色をこちらで決めていること。
+
+    Colab のダークでは ipywidgets の文字色のもとが明るくなる。題名は白い枠の上に
+    乗るので、上書きしないと地との差が 1.21:1 になって読めない。
+    """
+    css = widgets_css()
+    assert ".hui-wform.widget-html-content" in css or ".hui-wform.jupyter-widget-html" in css, (
+        "widgets.HTML（題名）の色を上書きする規則がありません"
+    )
+    assert "color:var(--hui-ink)!important" in css

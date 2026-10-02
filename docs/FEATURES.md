@@ -1,4 +1,4 @@
-# library-hiroba の機能一覧（0.8.0）
+# library-hiroba の機能一覧（0.8.1）
 
 **同じコードが Google Colab と PyHiroba（ブラウザの中で動く Python）の両方で動く**、
 という一点を土台にした教育向けライブラリ。入口は `ui` と `ai` の2つ。
@@ -70,6 +70,11 @@ README は「どう書くか」の案内、この文書は「何があるか」�
 
 容器（`ui.stack` など）に入れても動きます。ただし Colab では入力欄を生かすために
 **容器の中身を1つずつ出す**ので、容器の間隔や横並びは効きません。
+
+Colab では ipywidgets の部品を使うため、こちらの見た目と ipywidgets の決め打ち
+（入力欄 28px・名前の欄 80px）がぶつかります。打ち消しは `_css.py` の `widgets` に
+あり、実際に描いて測り直すには `python tools/check_widget_css.py` を使います
+（PyHiroba 側の HTML と同じ 36px・ボタンは伸びない、に揃えてあります）。
 
 ### そのほか
 

@@ -616,7 +616,58 @@ COMPONENT_CSS = {
   .hui-wsubmit:hover { background: var(--hui-accent-ink) !important; }
 }
 .hui-wsubmit:focus-visible { outline: 2px solid var(--hui-accent); outline-offset: 2px; }
-.hui-wout:empty { display: none; }""",
+.hui-wout:empty { display: none; }
+
+/* ここから下は、ipywidgets が決め打ちしている大きさとぶつかる分の打ち消し。
+   Colab でだけ起きる（PyHiroba は ipywidgets を使わない）。実測した値は
+   tools/check_widget_css.py で測り直せる。 */
+
+/* 高さ。ipywidgets は入力欄を 28px に決めている（--jp-widgets-inline-height）。
+   そこへ上下 8px の余白が乗るので、文字の入る高さが 10px しか残らず上下が切れる
+   （15px の文字には 18px 要る）。高さの指定を外し、PyHiroba 側の HTML と同じ
+   「余白＋行の高さ」で決まるようにする。包み（.hui-wfield）も 28px なので一緒に外す */
+.hui-wform .hui-wfield,
+.hui-wfield select,
+.hui-wfield input[type="text"],
+.hui-wfield input[type="number"],
+.hui-wfield textarea { height: auto !important; }
+/* 縦並びにすると、ipywidgets が入力欄に付けている flex: 1 1 … が**縦に**伸びる
+   （横並びのときは横に伸びる指定だった）。select が 148px に膨らむので止める */
+.hui-wfield select,
+.hui-wfield input[type="text"],
+.hui-wfield input[type="number"] { flex: 0 0 auto !important; }
+
+/* 名前の位置。ipywidgets は description を幅 80px の欄に押し込み、あふれた分を
+   「…」にする（クラス1（Aさんの案）→ クラス1（A…）。PyHiroba 側は入力欄の上に
+   出して折り返すので、そちらに合わせる */
+.hui-wform .hui-wfield {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+}
+.hui-wform .hui-wfield > .widget-label,
+.hui-wform .hui-wfield > .jupyter-widget-label {
+  width: auto !important;
+  max-width: none !important;
+  text-align: left !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  line-height: 1.5 !important;
+  margin: 0 0 3px !important;
+}
+
+/* 題名の色。Colab のダークでは ipywidgets の文字色のもと
+   （--jp-content-font-color1）が明るくなる。題名は widgets.HTML で出していて、
+   こちらの白い枠の上に乗るため、上書きしないと白地に白で読めなくなる */
+.hui-wform .widget-html, .hui-wform .widget-html-content,
+.hui-wform .jupyter-widget-html, .hui-wform .jupyter-widget-html-content,
+.hui-wform .widget-html-content *, .hui-wform .jupyter-widget-html-content * {
+  color: var(--hui-ink) !important;
+}
+
+/* ボタンの幅。VBox は子を横いっぱいに伸ばすので、width: auto では止まらない */
+.hui-wform .hui-wsubmit { align-self: flex-start !important; }""",
 }
 
 BASE_CSS = _minify(BASE_CSS)
