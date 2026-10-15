@@ -365,7 +365,10 @@ COMPONENT_CSS = {
 .hui-col { flex: 1 1 0; min-width: 200px; }
 .hui-col > :first-child { margin-top: 0; }
 .hui-col > :last-child { margin-bottom: 0; }
-.hui-col > .hui-stat { width: 100%; }""",
+/* .hui-stat は単体で横に並べるときのために右マージンを持っている。列の中では
+   幅 100% と重なって列からあふれ、画面幅に関係なく 8px の横スクロールが出る
+   （マージンはボーダーボックスの外なので要素の矩形には現れない） */
+.hui-col > .hui-stat { width: 100%; margin-right: 0; }""",
     "badge": """\
 .hui-badge {
   display: inline-block;
@@ -460,7 +463,12 @@ COMPONENT_CSS = {
 .hui-input {
   width: 100%;
   font-family: inherit;
-  font-size: 1em;
+  /* iOS は font-size が 16px 未満の入力欄にフォーカスすると、ページを自動で
+     拡大する（戻らないので、そのあと生徒は横スクロールしながら書くことになる）。
+     1em だと .hui の 15px を継いで条件に入ってしまうので、ここだけ実寸で書く */
+  font-size: 16px;
+  /* 指で押す部分は 44px 以上。padding だけだと 37px にとどまる */
+  min-height: 44px;
   color: var(--hui-ink);
   background: var(--hui-paper);
   border: 1px solid var(--hui-line);
@@ -482,6 +490,8 @@ COMPONENT_CSS = {
   border: 1px solid var(--hui-accent);
   border-radius: 999px;
   padding: 8px 22px;
+  /* 指で押す部分は 44px 以上（padding だけだと 37px） */
+  min-height: 44px;
   cursor: pointer;
 }
 @media (hover: hover) {
@@ -498,6 +508,11 @@ COMPONENT_CSS = {
   border-radius: var(--hui-radius);
   padding: 10px 14px;
   color: var(--hui-ink);
+  /* 切れ目の無い長い語（URL や英単語）を途中で折る。break-word では min-content 幅が
+     縮まらないため上の max-width: 82% を超えたままになり、user の発言は右寄せなので
+     画面の**左**へ出る。右へあふれないのでスクロールバーも出ず、先頭が永久に読めない。
+     anywhere は min-content まで縮めるので max-width が効くようになる */
+  overflow-wrap: anywhere;
 }
 .hui-msg-body > :first-child { margin-top: 0; }
 .hui-msg-body > :last-child { margin-bottom: 0; }
@@ -590,7 +605,12 @@ COMPONENT_CSS = {
   width: 100% !important;
   box-sizing: border-box;
   font-family: inherit !important;
-  font-size: 1em !important;
+  /* iOS は 16px 未満の入力欄にフォーカスするとページを自動で拡大する。1em だと
+     .hui-wform の 15px を継いで条件に入るので、ここだけ実寸で書く（HTML 経路の
+     .hui-input と同じ理由） */
+  font-size: 16px !important;
+  /* 指で押す部分は 44px 以上。下の height: auto と併せて、下限だけを決める */
+  min-height: 44px !important;
   color: var(--hui-ink) !important;
   background: var(--hui-paper) !important;
   border: 1px solid var(--hui-line) !important;
@@ -615,6 +635,9 @@ COMPONENT_CSS = {
   padding: 8px 22px !important;
   width: auto !important;
   height: auto !important;
+  /* 指で押す部分は 44px 以上。height: auto のままで下限だけを決める
+     （height を実寸で決めると ipywidgets 側の寸法と喧嘩する） */
+  min-height: 44px !important;
   box-shadow: none !important;
   cursor: pointer;
 }

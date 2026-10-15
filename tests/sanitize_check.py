@@ -120,10 +120,17 @@ class _Checker(HTMLParser):
             self.open_tags.pop()
 
 
+# ``<!-->`` / ``<!--->`` は HTML では中身の無いコメントとしてその場で閉じるのに、
+# Python の HTMLParser は ``-->`` まで続くと読む。この食い違いを残すと、検査する側が
+# 後ろのタグを全部コメントだと思い込み、違反を一つも見つけられない。
+# _components.py の同名の処理と対になっている（片方だけ直すと検査が無力になる）。
+_EMPTY_COMMENT_RE = re.compile(r"<!---?>")
+
+
 def check_html(html_text: str) -> list[str]:
     """違反のリストを返す。空リストなら合格。"""
     checker = _Checker()
-    checker.feed(html_text)
+    checker.feed(_EMPTY_COMMENT_RE.sub("<!---->", html_text))
     checker.close()
     if checker.open_tags:
         checker.violations.append(f"閉じられていないタグがある: {checker.open_tags!r}")

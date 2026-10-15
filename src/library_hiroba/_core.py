@@ -93,6 +93,58 @@ def unique_name(prefix: str = "hui") -> str:
     return f"{prefix}-{secrets.token_hex(4)}"
 
 
+def stale_module() -> str:
+    """入れ替えたのに読み込み直していないとき、その旨を返す。空なら問題なし。
+
+    ``%pip install -U`` はディスク上を新しくするが、**読み込み済みの module は
+    差し替わらない**。CSS も表も import した時点で組み上がって固まるため、
+    画面は古いまま変わらない。入れ直しても直らないので、たいてい
+    「ライブラリが直っていない」と受け取られる。実際そう言われたのが3回。
+
+    PyHiroba は同梱なので配布情報を持たない。その場合は何も言わない。
+    """
+    from importlib.metadata import PackageNotFoundError, version
+
+    from . import __version__
+
+    try:
+        on_disk = version("library-hiroba")
+    except PackageNotFoundError:
+        return ""
+    if on_disk == __version__:
+        return ""
+    return (
+        f"いま動いているのは {__version__} ですが、{on_disk} が入っています。"
+        "入れ替えても、読み込み済みのものは差し替わりません。"
+        "メニューの「ランタイム」→「セッションを再起動する」を実行してから、"
+        "もう一度このセルを動かしてください。"
+    )
+
+
+# 一度言えば足りる。部品ごとに出すと、表やカードを並べたセルで同じ警告が並ぶ
+_said_stale = False
+
+
+def _stale_notice() -> str:
+    """食い違っていれば、警告の断片 HTML を1回だけ返す。
+
+    ``ui.form()`` だけで言っていたのを、HTML を出す経路（``ui.card`` /
+    ``ui.table`` / ``ui.quiz`` / ``ui.html`` / ``ai.*``）にも広げるための入口。
+    フォームを使わない生徒は、古いままの画面を見ながら何も知らされなかった。
+    """
+    global _said_stale
+    if _said_stale:
+        return ""
+    message = stale_module()
+    if not message:
+        return ""
+    _said_stale = True
+    # _components は _core を取り込むので、ここで初めて読む（循環を避ける）
+    from ._components import alert
+
+    return alert(message, kind="warning").fragment() + "\n"
+
+
 class Widget:
     """全 UI 部品の基底クラス。
 
@@ -118,8 +170,8 @@ class Widget:
         extra = self.extra_css()
         return [extra] if extra else []
 
-    def _style_block(self) -> str:
-        needed = set(self._iter_css_keys())
+    def _style_block(self, extra_keys: Sequence[str] = ()) -> str:
+        needed = set(self._iter_css_keys()) | set(extra_keys)
         # COMPONENT_CSS の定義順を保って必要な分だけ連結（重複なし）
         parts = [base_css()] + [css for key, css in COMPONENT_CSS.items() if key in needed]
         for block in self._iter_extra_css():
@@ -139,7 +191,11 @@ class Widget:
         # ブラウザの HTML パーサがこれを body の外（head 相当の位置）へ移動させ、
         # PyHiroba のサニタイズ（DOMPurify）を通した時点で失われてしまう。
         # 内側にあれば設定を変えずにそのまま残る。
-        return f'<div class="hui">\n{self._style_block()}\n{self.fragment()}\n</div>'
+        notice = _stale_notice()
+        # 警告は alert の見た目を使うので、その CSS も一緒に出す
+        # （必要な分だけ連結する作りなので、入れ忘れると枠も色も無い素の文字になる）
+        style = self._style_block(("alert",) if notice else ())
+        return f'<div class="hui">\n{style}\n{notice}{self.fragment()}\n</div>'
 
     def __repr__(self) -> str:
         return f"<library_hiroba.{type(self).__name__}>"

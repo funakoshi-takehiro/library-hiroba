@@ -268,6 +268,10 @@ def resolve_embed(name: str | None) -> str:
 # 際限なく受けるとブラウザが何分も固まったまま落ちる。理由を言って先に止める。
 EMBED_LIMIT = 10000
 
+# 「見つからなかった」を表す番兵。None を既定値に使うと、探しているものが
+# None そのものだったときに区別できない
+_NOTHING = object()
+
 
 def as_texts(value: object, argument: str) -> list[str]:
     """文の並びとして受け取れる形にそろえる。
@@ -297,8 +301,11 @@ def as_texts(value: object, argument: str) -> list[str]:
     # 要素を str() で丸めない。辞書のリスト（本の一覧でいちばん自然な形）を渡すと
     # "{'title': '…', 'desc': '…'}" が丸ごとベクトル化され、Python の記号とキー名まで
     # 意味に混ざる。例外にならないので「なぜか結果がおかしい」とだけ見える
-    wrong = next((item for item in items if not isinstance(item, str)), None)
-    if wrong is not None:
+    # 既定値を None にすると、最初の非文字列が None だったときに下の判定が
+    # 通ってしまい、この検査ごと不発になる（None 以降の辞書や数値まで素通りする）。
+    # 値として現れえない番兵を使う
+    wrong = next((item for item in items if not isinstance(item, str)), _NOTHING)
+    if wrong is not _NOTHING:
         raise ValueError(
             f"{argument} の中に、文字列でないものがあります（例: {wrong!r}）。"
             "文だけのリストにしてください"

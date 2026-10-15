@@ -1053,3 +1053,57 @@ def test_nothing_is_said_when_there_is_no_distribution(monkeypatch):
 
     monkeypatch.setattr(meta, "version", missing)
     assert stale_module() == ""
+
+
+def test_clear_on_submit_empties_number_fields_too(fake_ipython, monkeypatch):
+    """数値欄が消えないと、1台を回して使う教室で前の人の値が黙って混ざる（B1）。
+
+    number の中身は ``widgets.Text``（空を持てるように FloatText を避けている）
+    なので、空にできる。``clearable`` から外れていたのは技術的な制約ではなく漏れ。
+    名前だけ消えて数値が残ると、新しい名前に前の数値が付いたまま送信される。
+    """
+    fake_ipywidgets(monkeypatch)
+
+    def handler(namae, kazu):
+        return ui.card("受付", f"{namae} / {kazu}")
+
+    form = ui.form(
+        handler,
+        ui.field("namae", label="名前"),
+        ui.field("kazu", label="数", kind="number"),
+        clear_on_submit=True,
+    )
+    form._ipython_display_()
+    children = fake_ipython.displayed[0]["vbox"]
+    button = next(c for c in children if getattr(c, "fn", None) is not None)
+    controls = [
+        c
+        for c in children
+        if c is not button and hasattr(c, "kwargs") and "description" in c.kwargs
+    ]
+    namae, kazu = controls
+    namae.value, kazu.value = "佐藤", "7"
+    button.fn(None)
+    settle()
+
+    assert "佐藤" in output_html(fake_ipython)  # handler には押した時点の値が渡る
+    assert namae.value == ""
+    assert kazu.value == "", "数値欄が残ると、次の生徒が前の値のまま送信してしまう"
+
+
+@pytest.mark.parametrize(
+    ("declaration", "why"),
+    [
+        (
+            "font-size:16px!important",
+            "16px 未満の入力欄にフォーカスすると、iOS がページを自動拡大して戻らない",
+        ),
+        (
+            "min-height:44px!important",
+            "指で押す部分が 44px 未満（padding だけでは 37px にとどまる）",
+        ),
+    ],
+)
+def test_widget_inputs_are_usable_with_a_finger(declaration, why):
+    """Colab（ipywidgets 経路）の入力欄も、タブレットで無理なく使えること。"""
+    assert declaration in widgets_css(), why

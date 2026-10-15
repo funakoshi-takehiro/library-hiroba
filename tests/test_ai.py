@@ -2186,3 +2186,32 @@ def test_an_unprobed_device_is_not_reported_as_checked(fresh_ai, monkeypatch):
     rows = dict(_ai.Recommendation("qwen05", "理由", found).rows())
     assert rows["WebGPU"] == "調べられませんでした", rows
     assert "使えません" not in rows["WebGPU"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        ["a", None, "b"],
+        ["a", None, {"x": 1}, 5],
+        [None],
+        [None, None],
+    ],
+)
+def test_as_texts_is_not_disarmed_by_a_none(value):
+    """``None`` が混ざると検査ごと不発になっていた（番兵バグ）。
+
+    最初の非文字列を探すときの既定値が ``None`` だと、探しものが ``None`` 自身の
+    ときに「見つからなかった」と区別できない。``None`` 以降の辞書や数値まで
+    まとめて素通りし、埋め込みは意味の無いベクトルを作って検索結果が静かに狂う。
+    """
+    from library_hiroba._ai import as_texts
+
+    with pytest.raises(ValueError):
+        as_texts(value, "texts")
+
+
+def test_as_texts_still_takes_a_plain_list_of_strings():
+    """正当な使い方を巻き込んで止めてはいけない。"""
+    from library_hiroba._ai import as_texts
+
+    assert as_texts(["あ", "い"], "texts") == ["あ", "い"]

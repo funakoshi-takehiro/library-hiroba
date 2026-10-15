@@ -8,6 +8,7 @@ from sanitize_check import check_html
 
 import library_hiroba
 from library_hiroba import ui
+from library_hiroba._components import css_stays_inside_scope, dangerous_html
 
 
 def test_version_is_well_formed():
@@ -210,8 +211,9 @@ def test_html_css_is_scoped_by_default():
     scope = w.scope_class
     assert scope is not None and scope.startswith("hui-raw-")
     assert f'class="hui-raw {scope}"' in rendered  # 中身のラッパーにスコープクラス
-    assert f".{scope} {{" in rendered  # CSS はスコープクラスの中にネストされる
-    assert ".x { color: red; }" in rendered
+    # セレクタの前にスコープクラスが付く。``.scope { ... }`` で包む（CSS ネスト）と
+    # ネスト未対応の端末でユーザー CSS が1行も効かないので、前置でなければならない
+    assert f".{scope} .x {{ color: red; }}" in rendered
 
 
 def test_html_css_scope_is_unique_per_instance():
@@ -753,3 +755,172 @@ def test_a_length_without_a_unit_is_refused():
     # 0 は単位が要らない。単位つきはこれまでどおり
     for good in ("0", 0, "12px", "1.5rem", "50%"):
         assert ui.stack(ui.card("あ"), gap=good)
+
+
+# --- ブラウザと読み方が食い違う書き方 ---------------------------------------
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '<!--><img src=x onerror="a=1">-->',
+        '<!---><img src=x onerror="a=1">-->',
+        '<!--><iframe srcdoc="x"></iframe>-->',
+    ],
+)
+def test_empty_comment_does_not_hide_dangerous_html(payload):
+    """``<!-->`` は HTML では中身の無いコメントとしてその場で閉じる。
+
+    Python の HTMLParser は ``-->`` まで続くと読むため、後ろのタグを全部コメント
+    本文として飲み込む。この食い違いを残すと、危険な書き方が検査を一つも通らずに
+    すり抜け、サニタイザの無い Colab で実際に動く。
+    """
+    assert dangerous_html(payload), "ブラウザは本物のタグとして組み立てる"
+    with pytest.raises(ValueError):
+        ui.html(payload)
+
+
+def test_a_normal_comment_is_still_not_flagged():
+    """中身のあるコメントはブラウザでも動かないので、止めてはいけない（過検知の確認）。"""
+    assert dangerous_html('<!-- <img src=x onerror="a=1"> -->') == []
+    ui.html('<!-- <img src=x onerror="a=1"> -->')  # 例外にならない
+
+
+def test_the_sanitize_checker_also_sees_through_empty_comments():
+    """検査する側が同じ盲点を持つと、二重の防御が同時に無力になる。"""
+    assert check_html('<div><!--><img src=x onerror="a=1">--></div>')
+
+
+def test_a_newline_inside_a_css_string_does_not_escape_the_scope():
+    """CSS では生の改行で文字列が終わる（仕様の bad-string-token）。
+
+    「引用符が閉じるまで中身」と読むと、文字列の中だと思い込んだ ``}`` を
+    ブラウザは本物として読み、CSS がスコープの外へ出てページ全体に効く。
+    """
+    css = 'content: "x\n} .hui-card { outline: 6px solid red } .zz {"'
+    assert css_stays_inside_scope(css) is False
+    with pytest.raises(ValueError):
+        ui.html("<b>x</b>", css=css)
+
+
+def test_a_backslash_keeps_a_css_string_going():
+    """行末の ``\\`` は改行を打ち消す。正当な書き方を巻き込んで止めてはいけない。"""
+    assert css_stays_inside_scope('content: "x\\\ny"') is True
+
+
+def test_scoped_css_is_prefixed_and_never_nested():
+    """``.scope { ... }`` で包むと、ネスト未対応の端末でユーザー CSS が1行も効かない。
+
+    iPadOS 15〜16.3（Safari 16.5 未満）は GIGA 端末に実際に残っており、そこでは
+    教材の棒グラフも吹き出しも素のテキストに落ちる。しかも何のエラーも出ない。
+    """
+    from library_hiroba._components import _css_top_level
+
+    w = ui.html("<b>x</b>", css="b { color: red }\n.a, .b { margin: 0 }")
+    out = w.extra_css()
+    assert f".{w.scope_class} b" in out
+    assert f".{w.scope_class} .a, .{w.scope_class} .b" in out
+    for prelude, body in _css_top_level(out):
+        if body is None or prelude.strip().startswith("@"):
+            continue
+        assert "{" not in body, f"ネストが残っている: {prelude.strip()[:40]}"
+
+
+def test_scoped_css_keeps_at_rules_working():
+    """``@media`` の中は前置しつつ、``@import`` はスコープに閉じ込められないので落とす。"""
+    w = ui.html("<b>x</b>", css='@import url("x.css"); @media print { .a { color: red } }')
+    out = w.extra_css()
+    assert "@import" not in out
+    assert "@media print" in out
+    assert f".{w.scope_class} .a" in out
+
+
+# --- 表の列数 ---------------------------------------------------------------
+
+
+def test_table_stops_when_every_row_brings_its_own_key():
+    """行ごとに違うキーを使うと、列が行数ぶん生えてセルが行数の2乗になる。
+
+    ``[{語: 意味} for 語, 意味 in ペア]`` は単語帳でいちばん自然な書き方なので、
+    黙って 100 万セルを作らせず、書き方を示して止める。
+    """
+    from library_hiroba._components import MAX_TABLE_COLUMNS
+
+    rows = [{f"w{i}": f"m{i}"} for i in range(MAX_TABLE_COLUMNS + 1)]
+    with pytest.raises(ValueError, match="列が"):
+        ui.table(rows)
+
+
+def test_table_still_fills_in_rows_that_skip_a_key():
+    """任意の項目が欠けている行は正当な使い方なので、空欄で並べる（止めない）。"""
+    table = ui.table([{"名前": "佐藤", "点": 90}, {"名前": "鈴木"}])
+    assert table.headers == ["名前", "点"]
+    assert table.rows == [["佐藤", 90], ["鈴木", ""]]
+
+
+# --- スマホ・タブレットでの見た目 -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("key", "declaration", "why"),
+    [
+        (
+            "chat",
+            "overflow-wrap:anywhere",
+            "切れ目の無い長い語で、user の発言が画面の左へ出る。"
+            "右にあふれないのでスクロールバーも出ず、先頭が永久に読めない",
+        ),
+        (
+            "columns",
+            "margin-right:0",
+            ".hui-stat が持つ右マージンが列の幅 100% と重なり、"
+            "画面幅に関係なく 8px の横スクロールが出る",
+        ),
+        (
+            "form",
+            "font-size:16px",
+            "16px 未満の入力欄にフォーカスすると、iOS がページを自動拡大して戻らない",
+        ),
+        (
+            "form",
+            "min-height:44px",
+            "指で押す部分が 44px 未満（padding だけでは 37px にとどまる）",
+        ),
+    ],
+)
+def test_it_works_with_a_finger_on_a_small_screen(key, declaration, why):
+    from library_hiroba._css import COMPONENT_CSS
+
+    assert declaration in re.sub(r"\s+", "", COMPONENT_CSS[key]), why
+
+
+def test_stale_module_is_told_on_the_html_paths_too(monkeypatch):
+    """フォームを使わない生徒にも、入れ替えが効いていないことを知らせる。
+
+    ``%pip install -U`` のあと再起動しないと、CSS も表も古いまま変わらない。
+    以前は ``ui.form()`` でしか言っていなかったので、``ui.card`` や ``ui.quiz``
+    しか使わない生徒は、直らない画面を見ながら何も知らされなかった。
+    """
+    import importlib.metadata as meta
+
+    from library_hiroba import _core
+
+    real = meta.version
+    monkeypatch.setattr(
+        meta, "version", lambda name: "9.9.9" if name == "library-hiroba" else real(name)
+    )
+    monkeypatch.setattr(_core, "_said_stale", False)
+
+    first = ui.card("題", "本文")._repr_html_()
+    assert "セッションを再起動する" in first
+    assert ".hui-alert" in first, "警告の CSS を同梱しないと、枠も色も無い素の文字になる"
+
+    # 一度言えば足りる。表や札を並べたセルで同じ警告が並ばないこと
+    assert "セッションを再起動する" not in ui.table([[1, 2]])._repr_html_()
+
+
+def test_nothing_is_said_when_the_version_matches(monkeypatch):
+    from library_hiroba import _core
+
+    monkeypatch.setattr(_core, "_said_stale", False)
+    assert "セッションを再起動する" not in ui.card("題", "本文")._repr_html_()

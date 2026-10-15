@@ -299,6 +299,14 @@ class Badge(HasValues):
         return f'<span class="hui-badge{color_class}">{value_html(self.text)}</span>'
 
 
+# 1行1辞書のとき、キーがそのまま列名になる。行ごとにキーが違う書き方
+# （``[{語: 意味} for 語, 意味 in ペア]`` のような単語帳）をすると、列が行数ぶん
+# 生えてセルが行数の2乗になる。例外も警告も出ないまま、1000行で100万セル・
+# 4000行で約140MB の HTML になり、GIGA 端末（3〜4GB）は描画で固まる。
+# 教室で読める表の列数からは十分に離してあるので、超えたら書き方の間違いとして止める。
+MAX_TABLE_COLUMNS = 200
+
+
 class Table(Widget):
     css_keys = ("table",)
 
@@ -349,11 +357,22 @@ class Table(Widget):
 
         if dict_rows:
             if headers is None:
-                headers = []
+                # 行をまたいでキーを集める（任意の項目が欠けている行は空欄で並ぶ）。
+                # dict は入れた順を保つので、出てきた順がそのまま列の順になる
+                collected: dict[object, None] = {}
                 for r in rows:
                     for key in r:
-                        if key not in headers:
-                            headers.append(key)
+                        collected[key] = None
+                headers = list(collected)
+                if len(headers) > MAX_TABLE_COLUMNS:
+                    raise ValueError(
+                        f"列が {len(headers)} 個になりました（行は {len(rows)} 行）。"
+                        "1行1辞書のときは、辞書のキーが列名になります。"
+                        "行ごとに違うキーを使うと、列が行数ぶん増えて表が開かなくなります。"
+                        "「名前と値を2列で並べたい」のであれば "
+                        "[[キー, 値] for キー, 値 in もとの辞書.items()] のように"
+                        "1行を値の一覧にしてください。"
+                    )
             self.rows = [[r.get(h, "") for h in headers] for r in rows]
         else:
             self.rows = [list(r) for r in rows]
@@ -385,31 +404,53 @@ class Table(Widget):
 _STYLE_CLOSE_RE = re.compile(r"</style", re.IGNORECASE)
 
 
+def _css_skip(css: str, i: int) -> int | None:
+    """``css[i]`` から始まるコメントか文字列を読み飛ばし、その次の位置を返す。
+
+    どちらでもなければ ``None``。
+
+    **CSS では生の改行で文字列が終わる**（仕様の bad-string-token）。ここを
+    見落として「引用符が閉じるまで中身」と読むと、文字列の中だと思い込んだ ``}``
+    をブラウザは本物として読み、スコープの外へ CSS が漏れる。下の括弧の検査と
+    ``scope_css()`` の両方がこの関数を使うので、食い違いが生まれない。
+    """
+    if css.startswith("/*", i):
+        end = css.find("*/", i + 2)
+        return len(css) if end == -1 else end + 2
+    quote = css[i]
+    if quote not in "\"'":
+        return None
+    j, n = i + 1, len(css)
+    while j < n:
+        ch = css[j]
+        if ch == "\\":
+            # 行末の \ は改行を打ち消して文字列を続ける（\r\n はひとつ分）
+            j += 3 if css.startswith("\r\n", j + 1) else 2
+            continue
+        if ch in "\n\r\f":
+            return j  # 文字列はここで切れる。改行は呼び出し側が読み直す
+        if ch == quote:
+            return j + 1
+        j += 1
+    return n
+
+
 def css_stays_inside_scope(css: str) -> bool:
     """波括弧の対応が取れていて、スコープの外に出ていないかを調べる。
 
-    ``scoped=True`` の CSS は ``.一意なクラス { ... }`` の中に入れるが、
-    途中に余分な ``}`` があるとそこでスコープが閉じ、以降がページ全体に効く。
+    ``scoped=True`` の CSS は ``.一意なクラス`` の中だけに効くよう書き換えるが、
+    途中に余分な ``}`` があるとそこでスコープが切れ、以降がページ全体に効く。
     文字列とコメントの中の括弧は数えない。
     """
     depth = 0
     i, n = 0, len(css)
-    quote = None
     while i < n:
-        ch = css[i]
-        if quote is not None:
-            if ch == "\\":
-                i += 2
-                continue
-            if ch == quote:
-                quote = None
-        elif ch in "\"'":
-            quote = ch
-        elif css.startswith("/*", i):
-            end = css.find("*/", i + 2)
-            i = n if end == -1 else end + 2
+        skipped = _css_skip(css, i)
+        if skipped is not None:
+            i = skipped
             continue
-        elif ch == "{":
+        ch = css[i]
+        if ch == "{":
             depth += 1
         elif ch == "}":
             depth -= 1
@@ -417,6 +458,166 @@ def css_stays_inside_scope(css: str) -> bool:
                 return False
         i += 1
     return depth == 0
+
+
+# スコープの中に閉じ込められない at-rule。落とす。
+#
+# ``@keyframes`` や ``@font-face`` は「名前」をページ全体に定義するもので、
+# スコープの内側という概念がない。CSS ネストで包んでいたときはネストの中では
+# 無効だったため黙って捨てられていた。前置方式ではトップレベルへ出せてしまうが、
+# それをすると名前がページ全体で共有になり、全セルが1つの document を共有する
+# PyHiroba では別のセルのアニメーションと取り違えが起きる。
+# ``notebooks/html_css_recipes.ipynb`` が「これらは scoped=False で書く」と
+# 教えているので、そちらに揃えてここでは落とす（従来と同じ挙動）。
+_AT_UNSCOPABLE = frozenset(
+    {
+        "import",
+        "charset",
+        "namespace",
+        "keyframes",
+        "font-face",
+        "property",
+        "counter-style",
+        "font-feature-values",
+    }
+)
+# 中身が普通のルールなので、前置しながら中へ降りる at-rule
+_AT_NESTING = frozenset({"media", "supports", "container", "layer", "scope"})
+_AT_NAME_RE = re.compile(r"@([-\w]+)")
+
+
+def _css_top_level(css: str) -> list[tuple[str, str | None]]:
+    """CSS を ``(前置き, 中身)`` の並びに切る。``;`` で終わるものの中身は ``None``。"""
+    items: list[tuple[str, str | None]] = []
+    start = 0
+    i, n = 0, len(css)
+    while i < n:
+        skipped = _css_skip(css, i)
+        if skipped is not None:
+            i = skipped
+            continue
+        ch = css[i]
+        if ch == "{":
+            depth, j = 1, i + 1
+            while j < n and depth:
+                inner = _css_skip(css, j)
+                if inner is not None:
+                    j = inner
+                    continue
+                if css[j] == "{":
+                    depth += 1
+                elif css[j] == "}":
+                    depth -= 1
+                j += 1
+            items.append((css[start:i], css[i + 1 : j - 1 if depth == 0 else j]))
+            i = start = j
+            continue
+        if ch == ";":
+            items.append((css[start : i + 1], None))
+            i += 1
+            start = i
+            continue
+        i += 1
+    tail = css[start:].strip()
+    if tail:
+        items.append((tail, None))
+    return items
+
+
+def _css_split_commas(text: str) -> list[str]:
+    """``:is(a, b)`` や ``[x="a,b"]`` の中のカンマでは切らずにセレクタを分ける。"""
+    parts: list[str] = []
+    start = depth = 0
+    i, n = 0, len(text)
+    while i < n:
+        skipped = _css_skip(text, i)
+        if skipped is not None:
+            i = skipped
+            continue
+        ch = text[i]
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            parts.append(text[start:i])
+            start = i + 1
+        i += 1
+    parts.append(text[start:])
+    return parts
+
+
+def _css_strip_comments(text: str) -> str:
+    """コメントだけを落とす（文字列の中は触らない）。
+
+    前置きの判定に使う。残したままだと、セレクタの前のコメントがセレクタに
+    混ざり、末尾のコメントが「セレクタの無い宣言」と見なされて空のルールが出る。
+    """
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        if text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            i = n if end == -1 else end + 2
+            continue
+        skipped = _css_skip(text, i)
+        if skipped is not None:
+            out.append(text[i:skipped])
+            i = skipped
+            continue
+        out.append(text[i])
+        i += 1
+    return "".join(out)
+
+
+def scope_css(css: str, scope: str) -> str:
+    """ユーザー CSS を ``scope`` の中だけに効くよう、セレクタに前置して書き換える。
+
+    ``scope { ... }`` で包む（CSS ネスト）だけでは、ネスト未対応のブラウザで
+    中身が丸ごと捨てられ、**ユーザー CSS が1行も効かない**。GIGA 端末には
+    iPadOS 15〜16.3（Safari 16.5 未満）が実際に残っており、そこでは教材の
+    棒グラフも吹き出しも素のテキストに落ちる。しかも何のエラーも出ない。
+    セレクタに直接前置すれば、どのブラウザでも同じように効く。
+
+    効き方（詳細度も含めて）はネスト版と同じになるようにしてある。
+    ``:is(.scope) sel`` と ``.scope sel`` は、クラス1つなら同じ詳細度。
+    """
+    rules: list[str] = []
+    loose: list[str] = []  # セレクタの無い宣言。scope 自身に当てる
+    for prelude, body in _css_top_level(css):
+        text = _css_strip_comments(prelude).strip()
+        if not text:
+            # 前置きがコメントだけ。中身があるなら scope 自身に当てる
+            if body is not None and body.strip():
+                rules.append(f"{scope} {{{body}}}")
+            continue
+        if text.startswith("@"):
+            found = _AT_NAME_RE.match(text)
+            name = found.group(1).lower() if found else ""
+            if name in _AT_UNSCOPABLE:
+                continue
+            if body is None:
+                rules.append(text if text.endswith(";") else text + ";")
+            elif name in _AT_NESTING:
+                inner = scope_css(body, scope)
+                if inner.strip():
+                    rules.append(f"{text} {{\n{inner}\n}}")
+            else:
+                # @keyframes や @font-face の中はセレクタではないので触らない
+                rules.append(f"{text} {{{body}}}")
+            continue
+        if body is None:
+            loose.append(text if text.endswith(";") else text + ";")
+            continue
+        selectors = ", ".join(
+            part.strip().replace("&", scope) if "&" in part else f"{scope} {part.strip()}"
+            for part in _css_split_commas(text)
+            if part.strip()
+        )
+        rules.append(f"{selectors} {{{body}}}" if selectors else f"{scope} {{{body}}}")
+    if loose:
+        rules.insert(0, f"{scope} {{\n{' '.join(loose)}\n}}")
+    return "\n".join(rules)
 
 
 # PyHiroba は表示の直前に本体側のサニタイザ（DOMPurify）を通すため、ここに並べた
@@ -445,6 +646,18 @@ DANGEROUS_TAGS = frozenset(
 
 # 値に javascript: が書ける属性
 URL_ATTRS = frozenset({"href", "src", "action", "formaction", "xlink:href", "data"})
+
+# ``<!-->`` と ``<!--->`` は HTML では「中身の無いコメント」としてその場で閉じる
+# （HTML 仕様の abrupt-closing-of-empty-comment）。ところが Python の HTMLParser は
+# ``-->`` が来るまでコメントが続くと見るため、後ろのタグを全部コメント本文として
+# 飲み込む。その食い違いを突かれると、``<!--><img src=x onerror=…>-->`` が下の検査に
+# 一つも引っかからないまま通り、Colab（サニタイザが無い）で実際に動いてしまう。
+# 見る前に、両者が同じ意味に読む ``<!---->`` へ直しておく。
+#
+# ブラウザとの食い違いは tools/check_parser_parity.py で一覧を突き合わせて確かめた。
+# すり抜けるのはこの2つだけで、``--!>`` や ``<![CDATA[`` や ``<?php`` は
+# HTMLParser 側でも検知できている。
+_EMPTY_COMMENT_RE = re.compile(r"<!---?>")
 
 
 class _DangerFinder(HTMLParser):
@@ -480,7 +693,7 @@ def dangerous_html(raw: str) -> list[str]:
     どちらの環境でも残るので、ここでは見ない。
     """
     finder = _DangerFinder()
-    finder.feed(raw)
+    finder.feed(_EMPTY_COMMENT_RE.sub("<!---->", raw))
     finder.close()
     # 同じものが何度も出てきても、伝えたいことは1回で足りる
     return list(dict.fromkeys(finder.found))
@@ -515,8 +728,9 @@ class RawHtml(Widget):
         if self.css is None:
             return ""
         if self.scope_class is not None:
-            # CSS ネスト（モダンブラウザ標準）でユーザー CSS 全体をスコープする
-            return f".{self.scope_class} {{\n{self.css}\n}}"
+            # セレクタに前置してスコープする。CSS ネストで包むと、ネスト未対応の
+            # 端末（iPadOS 15〜16.3 など）で中身が丸ごと捨てられて何も効かない
+            return scope_css(self.css, f".{self.scope_class}")
         return self.css
 
     def fragment(self) -> str:

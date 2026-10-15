@@ -20,7 +20,7 @@ import keyword
 from collections.abc import Sequence
 from typing import Callable, Union
 
-from ._core import Widget, as_number, esc, esc_attr, unique_name
+from ._core import Widget, as_number, esc, esc_attr, stale_module, unique_name
 from ._css import COMPONENT_CSS, base_css
 
 
@@ -99,35 +99,9 @@ def _resolve_pending(pending: object) -> object:
     return thinking(pending)
 
 
-def stale_module() -> str:
-    """入れ替えたのに読み込み直していないとき、その旨を返す。空なら問題なし。
-
-    ``%pip install -U`` はディスク上を新しくするが、**読み込み済みの module は
-    差し替わらない**。CSS も表も import した時点で組み上がって固まるため、
-    画面は古いまま変わらない。入れ直しても直らないので、たいてい
-    「ライブラリが直っていない」と受け取られる。実際そう言われたのが3回。
-
-    ここで気付けるのは、``ui.form()`` が**入れ替えたあとに呼ばれる**ため。
-    import の時点では、まだ食い違いが生まれていない。
-
-    PyHiroba は同梱なので配布情報を持たない。その場合は何も言わない。
-    """
-    from importlib.metadata import PackageNotFoundError, version
-
-    from . import __version__
-
-    try:
-        on_disk = version("library-hiroba")
-    except PackageNotFoundError:
-        return ""
-    if on_disk == __version__:
-        return ""
-    return (
-        f"いま動いているのは {__version__} ですが、{on_disk} が入っています。"
-        "入れ替えても、読み込み済みのものは差し替わりません。"
-        "メニューの「ランタイム」→「セッションを再起動する」を実行してから、"
-        "もう一度このセルを動かしてください。"
-    )
+# stale_module は _core に置いてある（上の import で持ってきている）。HTML を出す
+# 経路（ui.card / ui.table / ui.quiz / ui.html / ai.*）でも同じ食い違いを知らせたい
+# ので基層に移した。``from ._forms import stale_module`` も従来どおり通る。
 
 
 def get_form(form_id: str) -> Form | None:
@@ -540,7 +514,11 @@ class Form(Widget):
         output = widgets.Output()
         _add_class(output, "hui-wout")
 
-        clearable = {f.name for f in self.fields if f.kind in ("text", "multiline")}
+        # number も空にする。中身は widgets.Text なので "" を持てる（FloatText を
+        # 避けているのはそのため）。ここから外れていると、送信のたびに名前だけ消えて
+        # 数値が前のまま残り、1台を回して使う教室で前の人の値が混ざる。
+        # choice は Dropdown で、選択肢に無い "" を入れられないため対象にしない
+        clearable = {f.name for f in self.fields if f.kind in ("text", "multiline", "number")}
 
         def on_click(_):
             values = {name: control.value for name, control in controls.items()}
