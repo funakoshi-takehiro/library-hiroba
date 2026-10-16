@@ -303,8 +303,12 @@ class Badge(HasValues):
 # （``[{語: 意味} for 語, 意味 in ペア]`` のような単語帳）をすると、列が行数ぶん
 # 生えてセルが行数の2乗になる。例外も警告も出ないまま、1000行で100万セル・
 # 4000行で約140MB の HTML になり、GIGA 端末（3〜4GB）は描画で固まる。
-# 教室で読める表の列数からは十分に離してあるので、超えたら書き方の間違いとして止める。
-MAX_TABLE_COLUMNS = 200
+#
+# 見るのは**ますの総数**。列数だけで切ると、キーを全行で共有している幅広い表
+# （30行×365列の日付など。ますは行×列で、2乗には増えない）や、1行だけの辞書まで
+# 巻き込んで止めてしまう。どちらも描ける大きさなので止める理由がない。
+# 教室で読める表の大きさからは十分に離してある。
+MAX_TABLE_CELLS = 200_000
 
 
 class Table(Widget):
@@ -364,14 +368,24 @@ class Table(Widget):
                     for key in r:
                         collected[key] = None
                 headers = list(collected)
-                if len(headers) > MAX_TABLE_COLUMNS:
+                cells = len(headers) * len(rows)
+                if cells > MAX_TABLE_CELLS:
+                    widest = max((len(r) for r in rows), default=0)
+                    if len(headers) > widest * 2:
+                        # 列数が、どの行の項目数よりずっと多い。行ごとに別のキーを
+                        # 使った形で、これが2乗に増える書き方
+                        raise ValueError(
+                            f"列が {len(headers)} 個になりました（行は {len(rows)} 行）。"
+                            "1行1辞書のときは、辞書のキーが列名になります。"
+                            "行ごとに違うキーを使うと、列が行数ぶん増えて表が開かなくなります。"
+                            "「名前と値を2列で並べたい」のであれば "
+                            "[[キー, 値] for 辞書 in もとのリスト for キー, 値 in 辞書.items()] "
+                            "のように1行を値の一覧にしてください。"
+                        )
                     raise ValueError(
-                        f"列が {len(headers)} 個になりました（行は {len(rows)} 行）。"
-                        "1行1辞書のときは、辞書のキーが列名になります。"
-                        "行ごとに違うキーを使うと、列が行数ぶん増えて表が開かなくなります。"
-                        "「名前と値を2列で並べたい」のであれば "
-                        "[[キー, 値] for キー, 値 in もとの辞書.items()] のように"
-                        "1行を値の一覧にしてください。"
+                        f"表が大きすぎます（{len(rows)} 行 × {len(headers)} 列 ＝ "
+                        f"{cells} 個のます）。この大きさは端末が描くのに耐えられません。"
+                        "行を絞るか、見たい列だけを選んでから渡してください。"
                     )
             self.rows = [[r.get(h, "") for h in headers] for r in rows]
         else:
@@ -404,35 +418,69 @@ class Table(Widget):
 _STYLE_CLOSE_RE = re.compile(r"</style", re.IGNORECASE)
 
 
+_URL_OPEN_RE = re.compile(r"url\(", re.IGNORECASE)
+
+
 def _css_skip(css: str, i: int) -> int | None:
-    """``css[i]`` から始まるコメントか文字列を読み飛ばし、その次の位置を返す。
+    """``css[i]`` から始まる「中身を読まない塊」を飛ばし、その次の位置を返す。
 
-    どちらでもなければ ``None``。
+    塊でなければ ``None``。飛ばすのは次の4つで、どれも**中の括弧や引用符を
+    数えてはいけない**ところ。
 
-    **CSS では生の改行で文字列が終わる**（仕様の bad-string-token）。ここを
-    見落として「引用符が閉じるまで中身」と読むと、文字列の中だと思い込んだ ``}``
-    をブラウザは本物として読み、スコープの外へ CSS が漏れる。下の括弧の検査と
-    ``scope_css()`` の両方がこの関数を使うので、食い違いが生まれない。
+    - コメント ``/* … */``
+    - 文字列 ``"…"`` ``'…'``。**CSS では生の改行で文字列が終わる**
+      （仕様の bad-string-token）。ここを「引用符が閉じるまで中身」と読むと、
+      文字列の中だと思い込んだ ``}`` をブラウザは本物として読み、
+      スコープの外へ CSS が漏れる
+    - エスケープ ``\\?``。**文字列の外にも出てくる**（``.a\\" {`` のように
+      セレクタの中で使える）。これを見落とすと ``\\"`` が幻の文字列を開き、
+      前置きの切り出しがずれて、ブラウザの再解析で**次のルールがページ全体に
+      効く**（実測で確認した）
+    - 引用符の無い ``url(…)``。中の ``'`` ``;`` ``}`` は区切りではない
+      （``url(ken's.png)`` は正当な CSS）
+
+    括弧の検査と ``scope_css()`` の両方がこの関数を使うので、食い違いが生まれない。
     """
+    n = len(css)
+    ch = css[i]
+    if ch == "\\":
+        # 行末の \ は改行を打ち消す（\r\n はひとつ分）。それ以外は次の1文字を伴う
+        if css.startswith("\r\n", i + 1):
+            return i + 3
+        return min(i + 2, n)
     if css.startswith("/*", i):
         end = css.find("*/", i + 2)
-        return len(css) if end == -1 else end + 2
-    quote = css[i]
-    if quote not in "\"'":
-        return None
-    j, n = i + 1, len(css)
-    while j < n:
-        ch = css[j]
-        if ch == "\\":
-            # 行末の \ は改行を打ち消して文字列を続ける（\r\n はひとつ分）
-            j += 3 if css.startswith("\r\n", j + 1) else 2
-            continue
-        if ch in "\n\r\f":
-            return j  # 文字列はここで切れる。改行は呼び出し側が読み直す
-        if ch == quote:
-            return j + 1
-        j += 1
-    return n
+        return n if end == -1 else end + 2
+    if ch in "\"'":
+        j = i + 1
+        while j < n:
+            cur = css[j]
+            if cur == "\\":
+                j += 3 if css.startswith("\r\n", j + 1) else 2
+                continue
+            if cur in "\n\r\f":
+                return j  # 文字列はここで切れる。改行は呼び出し側が読み直す
+            if cur == ch:
+                return j + 1
+            j += 1
+        return n
+    found = _URL_OPEN_RE.match(css, i)
+    if found:
+        j = found.end()
+        while j < n and css[j] in " \t\n\r\f":
+            j += 1
+        if j < n and css[j] in "\"'":
+            return None  # 引用符つきは、ふつうの文字列として読めばよい
+        while j < n:
+            cur = css[j]
+            if cur == "\\":
+                j += 3 if css.startswith("\r\n", j + 1) else 2
+                continue
+            if cur == ")":
+                return j + 1
+            j += 1
+        return n
+    return None
 
 
 def css_stays_inside_scope(css: str) -> bool:
@@ -460,30 +508,26 @@ def css_stays_inside_scope(css: str) -> bool:
     return depth == 0
 
 
-# スコープの中に閉じ込められない at-rule。落とす。
+# 中身を持たない（``;`` で終わる）at-rule のうち、スコープに閉じ込められないので
+# 落とすもの。``@import`` は外部の CSS をページ全体に持ち込み、``@layer a;`` は
+# グローバルなレイヤ名を宣言する。
 #
-# ``@keyframes`` や ``@font-face`` は「名前」をページ全体に定義するもので、
-# スコープの内側という概念がない。CSS ネストで包んでいたときはネストの中では
-# 無効だったため黙って捨てられていた。前置方式ではトップレベルへ出せてしまうが、
-# それをすると名前がページ全体で共有になり、全セルが1つの document を共有する
-# PyHiroba では別のセルのアニメーションと取り違えが起きる。
-# ``notebooks/html_css_recipes.ipynb`` が「これらは scoped=False で書く」と
-# 教えているので、そちらに揃えてここでは落とす（従来と同じ挙動）。
-_AT_UNSCOPABLE = frozenset(
-    {
-        "import",
-        "charset",
-        "namespace",
-        "keyframes",
-        "font-face",
-        "property",
-        "counter-style",
-        "font-feature-values",
-    }
-)
+# 中身を持つ at-rule は、下の ``_AT_NESTING``（中が普通のルールなので前置しながら
+# 降りられるもの）以外はすべて落とす。``@keyframes`` ``@font-face`` ``@property`` は
+# どれも「名前」をページ全体に定義するもので、スコープの内側という概念がない。
+# CSS ネストで包んでいたときはネストの中では無効だったため黙って捨てられていた。
+# 前置方式ではトップレベルへ出せてしまうが、それをすると名前がページ全体で共有に
+# なり、全セルが1つの document を共有する PyHiroba では別のセルのアニメーションと
+# 取り違えが起きる。``notebooks/html_css_recipes.ipynb`` が「これらは scoped=False
+# で書く」と教えているので、そちらに揃える（従来と同じ挙動）。
+# 知らない at-rule も、中身ごと通すと何を定義されるか分からないため同じく落とす。
+_AT_UNSCOPABLE = frozenset({"import", "charset", "namespace", "layer"})
 # 中身が普通のルールなので、前置しながら中へ降りる at-rule
 _AT_NESTING = frozenset({"media", "supports", "container", "layer", "scope"})
 _AT_NAME_RE = re.compile(r"@([-\w]+)")
+# @media / @supports の入れ子は段ごとに中を読み直すので、深く重ねると時間が伸び、
+# 再帰も段数ぶん使う。表示のときに素の RecursionError を出さないよう先に止める
+_AT_MAX_DEPTH = 32
 
 
 def _css_top_level(css: str) -> list[tuple[str, str | None]]:
@@ -513,6 +557,10 @@ def _css_top_level(css: str) -> list[tuple[str, str | None]]:
             i = start = j
             continue
         if ch == ";":
+            # ``url(data:image/gif;base64,…)`` の ; で切ってしまうと宣言が二つに
+            # 割れ、つなぎ直すときに空白が入ってブラウザが bad-url として宣言ごと
+            # 捨てる（画像が黙って消える）。url(…) は _css_skip がまとめて飛ばすので、
+            # ここへは届かない
             items.append((css[start : i + 1], None))
             i += 1
             start = i
@@ -570,7 +618,58 @@ def _css_strip_comments(text: str) -> str:
     return "".join(out)
 
 
-def scope_css(css: str, scope: str) -> str:
+def _css_has_brace(text: str) -> bool:
+    """波括弧が**トークンとして**残っているか（文字列やコメントの中は数えない）。
+
+    ``[x='a{b']`` のように文字列の中の波括弧は正当なので、素朴に ``"{" in text``
+    で見ると教材が書けなくなる。
+    """
+    i, n = 0, len(text)
+    while i < n:
+        skipped = _css_skip(text, i)
+        if skipped is not None:
+            i = skipped
+            continue
+        if text[i] in "{}":
+            return True
+        i += 1
+    return False
+
+
+def _css_put_scope(part: str, scope: str) -> str:
+    """セレクタ1つにスコープを効かせる。``&`` があればそこへ、無ければ前に付ける。
+
+    ``&`` は**トークンとして置かれているものだけ**を見る。文字列・属性値・
+    丸括弧の中の ``&``（``[data-x="a&b"]`` や ``[href="?a&b"]``）に反応すると、
+    値が書き換わってセレクタの意味が壊れ、しかも前置が付かないまま
+    **トップレベルのルール**として出てしまう（実測で確認した）。
+    """
+    text = part.strip()
+    pieces: list[str] = []
+    last = 0
+    paren = 0
+    i, n = 0, len(text)
+    while i < n:
+        skipped = _css_skip(text, i)
+        if skipped is not None:
+            i = skipped
+            continue
+        ch = text[i]
+        if ch in "([":
+            paren += 1
+        elif ch in ")]":
+            paren = max(0, paren - 1)
+        elif ch == "&" and paren == 0:
+            pieces.append(text[last:i])
+            last = i + 1
+        i += 1
+    if not pieces:
+        return f"{scope} {text}"
+    pieces.append(text[last:])
+    return scope.join(pieces)
+
+
+def scope_css(css: str, scope: str, depth: int = 0) -> str:
     """ユーザー CSS を ``scope`` の中だけに効くよう、セレクタに前置して書き換える。
 
     ``scope { ... }`` で包む（CSS ネスト）だけでは、ネスト未対応のブラウザで
@@ -594,27 +693,49 @@ def scope_css(css: str, scope: str) -> str:
         if text.startswith("@"):
             found = _AT_NAME_RE.match(text)
             name = found.group(1).lower() if found else ""
-            if name in _AT_UNSCOPABLE:
-                continue
             if body is None:
-                rules.append(text if text.endswith(";") else text + ";")
+                # @import / @charset / @namespace はスコープに閉じ込められない
+                if name not in _AT_UNSCOPABLE:
+                    rules.append(text if text.endswith(";") else text + ";")
             elif name in _AT_NESTING:
-                inner = scope_css(body, scope)
+                if depth >= _AT_MAX_DEPTH:
+                    raise ValueError(
+                        f"CSS の @ 指定の入れ子が深すぎます（{_AT_MAX_DEPTH} 段まで）。"
+                        "@media や @supports の重なりを浅くしてください。"
+                    )
+                inner = scope_css(body, scope, depth + 1)
                 if inner.strip():
                     rules.append(f"{text} {{\n{inner}\n}}")
             else:
-                # @keyframes や @font-face の中はセレクタではないので触らない
-                rules.append(f"{text} {{{body}}}")
+                # 中がセレクタでない at-rule（@keyframes @font-face など）は、
+                # どれも「名前」をページ全体に定義するもので、スコープの内側という
+                # 概念がない。ベンダー接頭辞つき（@-webkit-keyframes）も知らない
+                # at-rule も、ここへ来てまとめて落ちる。中身ごと通すと何を定義
+                # されるか分からないため、知らないものは通さないほうを選ぶ。
+                # CSS ネストで包んでいたときもこれらは無効で捨てられていたので、
+                # 従来と同じ挙動
+                pass
             continue
         if body is None:
             loose.append(text if text.endswith(";") else text + ";")
             continue
         selectors = ", ".join(
-            part.strip().replace("&", scope) if "&" in part else f"{scope} {part.strip()}"
+            _css_put_scope(part, scope)
             for part in _css_split_commas(text)
             if part.strip()
         )
-        rules.append(f"{selectors} {{{body}}}" if selectors else f"{scope} {{{body}}}")
+        if not selectors:
+            rules.append(f"{scope} {{{body}}}")
+            continue
+        # セレクタに波括弧が残っているのは、前置きの切り出しが失敗した証拠。
+        # そのまま出すとブラウザの再解析で後ろのルールがトップレベルに出て、
+        # ページ全体に効いてしまう（実測で確認した）。黙って漏らさず止める
+        if _css_has_brace(selectors):
+            raise ValueError(
+                "CSS を読み取れませんでした。セレクタの書き方を見直してください"
+                f"（読み取れなかったところ: {selectors.strip()[:40]}）。"
+            )
+        rules.append(f"{selectors} {{{body}}}")
     if loose:
         rules.insert(0, f"{scope} {{\n{' '.join(loose)}\n}}")
     return "\n".join(rules)
@@ -647,17 +768,21 @@ DANGEROUS_TAGS = frozenset(
 # 値に javascript: が書ける属性
 URL_ATTRS = frozenset({"href", "src", "action", "formaction", "xlink:href", "data"})
 
-# ``<!-->`` と ``<!--->`` は HTML では「中身の無いコメント」としてその場で閉じる
-# （HTML 仕様の abrupt-closing-of-empty-comment）。ところが Python の HTMLParser は
-# ``-->`` が来るまでコメントが続くと見るため、後ろのタグを全部コメント本文として
-# 飲み込む。その食い違いを突かれると、``<!--><img src=x onerror=…>-->`` が下の検査に
-# 一つも引っかからないまま通り、Colab（サニタイザが無い）で実際に動いてしまう。
-# 見る前に、両者が同じ意味に読む ``<!---->`` へ直しておく。
+# ブラウザと Python の HTMLParser が**同じ文字列を別の形に読む**ところ。
+# 見る前に、両者が同じ意味に読む ``<!---->`` へ直しておく。直さないと、後ろのタグが
+# 全部コメント本文として飲み込まれ、下の検査に一つも引っかからないまま通って、
+# Colab（サニタイザが無い）で実際に動いてしまう。
 #
-# ブラウザとの食い違いは tools/check_parser_parity.py で一覧を突き合わせて確かめた。
-# すり抜けるのはこの2つだけで、``--!>`` や ``<![CDATA[`` や ``<?php`` は
-# HTMLParser 側でも検知できている。
-_EMPTY_COMMENT_RE = re.compile(r"<!---?>")
+# 1. ``<!-->`` ``<!--->`` … HTML では「中身の無いコメント」としてその場で閉じる
+#    （仕様の abrupt-closing-of-empty-comment）。HTMLParser は ``-->`` まで続くと見る。
+# 2. ``<![CDATA[…>`` … HTML（SVG などの外来コンテンツの外）では ``<![`` は
+#    **最初の ``>`` で終わる偽コメント**。HTMLParser は ``]]>`` を探すため、
+#    ``<![CDATA[>`` や ``<![CDATA[a>b`` のように ``]]>`` の無い書き方で食い違う。
+#    ``]]>`` がある場合もその ``>`` が最初の ``>`` なので、同じ置き換えで一致する。
+#
+# 食い違いは tools/check_parser_parity.py で一覧を突き合わせて確かめている。
+# ``--!>`` ``<?php`` ``<![x]>`` ``</%>`` は HTMLParser 側でも検知できている。
+_BROWSER_COMMENT_RE = re.compile(r"<!---?>|<!\[CDATA\[[^>]*>", re.IGNORECASE)
 
 
 class _DangerFinder(HTMLParser):
@@ -693,7 +818,7 @@ def dangerous_html(raw: str) -> list[str]:
     どちらの環境でも残るので、ここでは見ない。
     """
     finder = _DangerFinder()
-    finder.feed(_EMPTY_COMMENT_RE.sub("<!---->", raw))
+    finder.feed(_BROWSER_COMMENT_RE.sub("<!---->", raw))
     finder.close()
     # 同じものが何度も出てきても、伝えたいことは1回で足りる
     return list(dict.fromkeys(finder.found))

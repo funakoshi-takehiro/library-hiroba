@@ -24,8 +24,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from library_hiroba import ui  # noqa: E402
+from library_hiroba import _core, ui  # noqa: E402
 from library_hiroba._css import FONT_IMPORT  # noqa: E402
+
+# 「入れ替えたのに再起動していない」の知らせは Colab のセルに向けたもので、
+# 静的な見本帳に焼き込むものではない。公開直前の開発機（__init__ が次の版で
+# ディスク上の配布が前の版）で作ると、1回だけという作りのせいで light の
+# ページにだけ入り、3枚のうち1枚だけ違う、という気付きにくい形になる
+_core._stale_unsaid.clear()
 
 OUT = ROOT / "tools" / "out"
 

@@ -844,10 +844,27 @@ def test_table_stops_when_every_row_brings_its_own_key():
     ``[{語: 意味} for 語, 意味 in ペア]`` は単語帳でいちばん自然な書き方なので、
     黙って 100 万セルを作らせず、書き方を示して止める。
     """
-    from library_hiroba._components import MAX_TABLE_COLUMNS
-
-    rows = [{f"w{i}": f"m{i}"} for i in range(MAX_TABLE_COLUMNS + 1)]
+    rows = [{f"w{i}": f"m{i}"} for i in range(1000)]
     with pytest.raises(ValueError, match="列が"):
+        ui.table(rows)
+
+
+def test_table_still_takes_a_wide_table_whose_rows_share_keys():
+    """キーを全行で共有する幅広い表は、ますが2乗には増えないので止めない。
+
+    列数だけで切ると、30行×365列（日付を列にした表）や1行だけの辞書まで
+    巻き込んで止めてしまう。どちらも描ける大きさで、止める理由がない。
+    """
+    wide = [{f"d{i}": i for i in range(365)} for _ in range(30)]
+    assert len(ui.table(wide).headers) == 365
+    one_row = [{f"k{i}": i for i in range(500)}]
+    assert len(ui.table(one_row).headers) == 500
+
+
+def test_table_says_so_when_it_is_simply_too_big():
+    """2乗の形ではないが端末が描けない大きさのときは、大きさとして言う。"""
+    rows = [{f"c{j}": j for j in range(300)} for _ in range(1000)]
+    with pytest.raises(ValueError, match="大きすぎます"):
         ui.table(rows)
 
 
@@ -909,7 +926,7 @@ def test_stale_module_is_told_on_the_html_paths_too(monkeypatch):
     monkeypatch.setattr(
         meta, "version", lambda name: "9.9.9" if name == "library-hiroba" else real(name)
     )
-    monkeypatch.setattr(_core, "_said_stale", False)
+    monkeypatch.setattr(_core, "_stale_unsaid", [True])
 
     first = ui.card("題", "本文")._repr_html_()
     assert "セッションを再起動する" in first
@@ -922,5 +939,138 @@ def test_stale_module_is_told_on_the_html_paths_too(monkeypatch):
 def test_nothing_is_said_when_the_version_matches(monkeypatch):
     from library_hiroba import _core
 
-    monkeypatch.setattr(_core, "_said_stale", False)
+    monkeypatch.setattr(_core, "_stale_unsaid", [True])
     assert "セッションを再起動する" not in ui.card("題", "本文")._repr_html_()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        # HTML では <![ は「最初の > で終わる偽コメント」。HTMLParser は ]]> を
+        # 探すので、]]> の無い書き方で食い違い、後ろのタグが全部コメント扱いになる
+        '<![CDATA[><img src=x onerror="a=1">',
+        '<![CDATA[a>b<img src=x onerror="a=1">',
+        '<!--><![CDATA[><img src=x onerror="a=1">',
+    ],
+)
+def test_a_bogus_comment_does_not_hide_dangerous_html(payload):
+    assert dangerous_html(payload), "ブラウザは本物のタグとして組み立てて動かす"
+    with pytest.raises(ValueError):
+        ui.html(payload)
+
+
+def test_an_unclosed_cdata_is_not_flagged():
+    """``>`` が一つも無ければブラウザも中身を組み立てないので、止めなくてよい。"""
+    assert dangerous_html('<![CDATA[<img src=x onerror="a=1">'.replace(">", "", 1)) == []
+
+
+# --- scope_css の字句解析（ブラウザと同じに読めているか）---------------------
+
+
+@pytest.mark.parametrize(
+    ("css", "why"),
+    [
+        (
+            '[data-x="a&b"] { color: red }',
+            "文字列の中の & をネスト参照と取り違えると、値が書き換わったうえに"
+            "前置が付かず、トップレベルのルールとしてページ全体に効く",
+        ),
+        (
+            '.a\\" { color: red }\n.hui-card { color: blue }',
+            "セレクタの中のエスケープを見落とすと幻の文字列が開き、前置きの"
+            "切り出しがずれて、ブラウザの再解析で次のルールがページ全体に出る",
+        ),
+    ],
+)
+def test_every_rule_keeps_the_scope(css, why):
+    """出力のどの ``{`` も、その前にスコープのクラスを持っていること。
+
+    検証に ``_css_top_level`` を使わない。字句解析そのものを壊したときに、
+    壊れた字句解析で見に行くと漏れも見えなくなり、テストが通ってしまう
+    （変異テストで実際にそうなった）。ここでは素の文字列操作だけで見る。
+    """
+    w = ui.html("<b>x</b>", css=css)
+    out = w.extra_css()
+    for chunk in out.split("}"):
+        if "{" not in chunk:
+            continue
+        selector = chunk.rsplit("{", 1)[0]
+        if selector.lstrip().startswith("@"):
+            continue
+        assert w.scope_class in selector, f"{why}（外に出た: {selector.strip()[:40]}）"
+
+
+@pytest.mark.parametrize(
+    ("css", "keep"),
+    [
+        # url() の中の ' は文字列の始まりではない。昔はここで ValueError になっていた
+        (".a { background: url(ken's.png) }", "ken's.png"),
+        # 丸括弧の中の ; で宣言を切ると、つなぎ直すときに空白が入って画像が消える
+        ("background: url(data:image/gif;base64,R0lGOD)", "image/gif;base64"),
+        # 文字列の中の波括弧は正当
+        ("[x='a{b'] { color: red }", "a{b"),
+        # 文字列の中の & をネスト参照と取り違えると、属性の値が書き換わる
+        ('[data-x="a&b"] { color: red }', '[data-x="a&b"]'),
+        ('[href="?a&b"] { color: red }', '[href="?a&b"]'),
+    ],
+)
+def test_legitimate_css_survives_scoping(css, keep):
+    assert keep in ui.html("<b>x</b>", css=css).extra_css()
+
+
+def test_vendor_prefixed_keyframes_are_dropped_like_the_plain_one():
+    """``@-webkit-keyframes`` も名前をページ全体に定義する。接頭辞で見逃さない。"""
+    out = ui.html("<b>x</b>", css="@-webkit-keyframes zz { from { opacity: 0 } }\n.a { color: red }").extra_css()
+    assert "keyframes" not in out
+    assert ".a { color: red }" in out
+
+
+def test_deeply_nested_at_rules_say_so_instead_of_crashing():
+    """表示のときに素の RecursionError を出さない（ui.html は成功済みなので尚更）。"""
+    deep = "@media print {" * 1000 + ".a{color:red}" + "}" * 1000
+    with pytest.raises(ValueError, match="入れ子"):
+        ui.html("<b>x</b>", css=deep).extra_css()
+
+
+def test_a_broken_distribution_stays_quiet(monkeypatch):
+    """配布情報が壊れていると版が None で返る。意味の通らない警告を出さない。"""
+    import importlib.metadata as meta
+
+    from library_hiroba import _core
+
+    monkeypatch.setattr(_core, "_stale_unsaid", [True])
+    monkeypatch.setattr(meta, "version", lambda name: None)
+    assert _core.stale_module() == ""
+    assert "セッションを再起動する" not in ui.card("題", "本文")._repr_html_()
+
+
+def test_an_unreadable_distribution_does_not_break_the_display(monkeypatch):
+    """親切で出している知らせのために、表示そのものを壊してはいけない。"""
+    import importlib.metadata as meta
+
+    from library_hiroba import _core
+
+    def boom(name):
+        raise ValueError("A distribution name is required.")
+
+    monkeypatch.setattr(_core, "_stale_unsaid", [True])
+    monkeypatch.setattr(meta, "version", boom)
+    assert "題" in ui.card("題", "本文")._repr_html_()
+
+
+def test_css_brace_check_ignores_strings_and_comments():
+    """セレクタに波括弧が残っていないかの見張りは、文字列の中を数えない。
+
+    ``scope_css()`` はこれを使って「前置きの切り出しに失敗した」ことを捕まえ、
+    黙ってページ全体に漏らす代わりに止める。素朴に ``"{" in text`` で見ると
+    ``[x='a{b']`` のような正当なセレクタまで止めてしまう。
+    """
+    from library_hiroba._components import _css_has_brace
+
+    assert _css_has_brace(".a { color: red }") is True
+    assert _css_has_brace(".a }") is True
+    assert _css_has_brace("[x='a{b']") is False
+    assert _css_has_brace('[x="a}b"]') is False
+    assert _css_has_brace("/* { */ .a") is False
+    assert _css_has_brace(".a\\{b") is False
+    assert _css_has_brace(".a .b > .c:hover") is False

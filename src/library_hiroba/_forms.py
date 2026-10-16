@@ -20,7 +20,14 @@ import keyword
 from collections.abc import Sequence
 from typing import Callable, Union
 
-from ._core import Widget, as_number, esc, esc_attr, stale_module, unique_name
+from ._core import (
+    Widget,
+    _stale_notice,
+    as_number,
+    esc,
+    esc_attr,
+    unique_name,
+)
 from ._css import COMPONENT_CSS, base_css
 
 
@@ -442,7 +449,14 @@ class Form(Widget):
         ``<style>`` が出てこない。ここで一度だけ出す。``widgets`` の分は
         ipywidgets を相手にした上書きなので、HTML 経路には含めない。
         """
-        parts = [base_css(), COMPONENT_CSS["form"], COMPONENT_CSS["widgets"]]
+        # alert は、入力の誤りと「版が食い違っている」警告で使う。入れ忘れると
+        # 枠も色も無い素の文字になる
+        parts = [
+            base_css(),
+            COMPONENT_CSS["alert"],
+            COMPONENT_CSS["form"],
+            COMPONENT_CSS["widgets"],
+        ]
         return "<style>" + "\n".join(parts) + "</style>"
 
     def needs_ipywidgets(self) -> bool:
@@ -520,8 +534,40 @@ class Form(Widget):
         # choice は Dropdown で、選択肢に無い "" を入れられないため対象にしない
         clearable = {f.name for f in self.fields if f.kind in ("text", "multiline", "number")}
 
+        def show_error(error: ValueError) -> None:
+            # 入力の誤り（数の欄に文字、選択肢に無い値…）。PyHiroba 本体は
+            # この文言をそのまま画面に出すので、Colab も同じものを出す。
+            # traceback を出すと、同じ書き間違いが環境によって別の顔で出る
+            from ._components import alert
+
+            put_into(output, alert(str(error), kind="warning"))
+
+        def show_crash() -> None:
+            import traceback
+
+            output.outputs = (
+                {"output_type": "stream", "name": "stderr", "text": traceback.format_exc()},
+            )
+
         def on_click(_):
             values = {name: control.value for name, control in controls.items()}
+            # handler を直に呼ばず submit() を通す。欄の種類に合わせた変換が
+            # ここにあり、飛ばすと Colab だけ handler に違う型が渡る。
+            #
+            # **欄を空にするのも、何回目かを数えるのも、ここを通ったあと**にする。
+            # 先にやると (1) 変換に失敗した欄そのものが消えて、警告が指している
+            # 値を生徒が確認できない、(2) 空になった欄で2回目を押すと必ず失敗する
+            # のに、数だけは進むので**走っている1回目の答えが stale として
+            # 打ち切られ**、出ていた答えが警告に置き換わる
+            try:
+                result = self.submit(**values)
+            except ValueError as error:
+                show_error(error)
+                return
+            except Exception:  # noqa: BLE001 — 書き間違いも、出さないと直せない
+                show_crash()
+                return
+
             if self.clear_on_submit:
                 for name in clearable:
                     controls[name].value = ""
@@ -530,42 +576,30 @@ class Form(Widget):
             # 新しい質問の下に前の答えが残るので、古い実行には書かせない
             self._run += 1
             mine = self._run
-            # display_result まで含めて囲む。ipywidgets の押下処理から出た例外は
+            # display_result まで囲む。ipywidgets の押下処理から出た例外は
             # 呼び出し元に戻る先が無く、Colab では画面にもログにも出ないまま消える
             # （押しても何も起きない、という形だけが残る）
             try:
-                # handler を直に呼ばず submit() を通す。欄の種類に合わせた変換が
-                # ここにあり、飛ばすと Colab だけ handler に違う型が渡る
-                result = self.submit(**values)
                 display_result(
                     result, into=output, pending=self.pending, stale=lambda: self._run != mine
                 )
             except ValueError as error:
-                # 入力の誤り（数の欄に文字、選択肢に無い値…）。PyHiroba 本体は
-                # この文言をそのまま画面に出すので、Colab も同じものを出す。
-                # traceback を出すと、同じ書き間違いが環境によって別の顔で出る
-                from ._components import alert
-
-                put_into(output, alert(str(error), kind="warning"))
-            except Exception:  # noqa: BLE001 — 書き間違いも、出さないと直せない
-                import traceback
-
-                output.outputs = (
-                    {"output_type": "stream", "name": "stderr", "text": traceback.format_exc()},
-                )
+                show_error(error)
+            except Exception:  # noqa: BLE001
+                show_crash()
 
         button.on_click(on_click)
         # ipywidgets の部品には .hui-... の CSS が付いてこないので、ここで一度だけ出す
         # （HTML を出さない経路なので、部品側の <style> も出ない）
         style = widgets.HTML(self._widget_style_block())
         # 入れ替えたのに再起動していないと、ここから下の見た目はぜんぶ古い版の
-        # ものになる。見えない形で起きるので、見ている場所で言う
-        stale = stale_module()
-        notice = []
-        if stale:
-            from ._components import alert
-
-            notice = [widgets.HTML(alert(stale, kind="warning")._repr_html_())]
+        # ものになる。見えない形で起きるので、見ている場所で言う。
+        #
+        # _core と同じ「一度言えば足りる」入口を使う。自分で alert(...) を組んで
+        # _repr_html_() を呼ぶと、その _repr_html_() 自身がもう1枚同じ警告を
+        # 前置するため、同じ文面が2枚並ぶ（断片を使えばそれが起きない）
+        fragment = _stale_notice()
+        notice = [widgets.HTML(fragment)] if fragment else []
         header = [widgets.HTML(f"<b>{esc(self.title)}</b>")] if self.title is not None else []
         box = widgets.VBox([style, *notice, *header, *controls.values(), button, output])
         # 配色・角丸・書体は base_css が .hui に載せている。ここを付け忘れると

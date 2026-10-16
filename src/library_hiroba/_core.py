@@ -103,15 +103,20 @@ def stale_module() -> str:
 
     PyHiroba は同梱なので配布情報を持たない。その場合は何も言わない。
     """
-    from importlib.metadata import PackageNotFoundError, version
+    from importlib.metadata import version
 
     from . import __version__
 
     try:
         on_disk = version("library-hiroba")
-    except PackageNotFoundError:
+    except Exception:  # noqa: BLE001
+        # 配布情報が無い（PyHiroba は同梱）か、読めない。これは親切で出している
+        # 知らせなので、ここで例外を上げると表示そのものを壊す。入れ替えが
+        # 途中で切れて壊れた METADATA が残ることが実際にある
         return ""
-    if on_disk == __version__:
+    # 壊れた配布情報では版が None や空で返る。そのまま比べると
+    #「0.9.0 ですが、None が入っています」という意味の通らない警告になる
+    if not on_disk or on_disk == __version__:
         return ""
     return (
         f"いま動いているのは {__version__} ですが、{on_disk} が入っています。"
@@ -121,8 +126,15 @@ def stale_module() -> str:
     )
 
 
-# 一度言えば足りる。部品ごとに出すと、表やカードを並べたセルで同じ警告が並ぶ
-_said_stale = False
+# 一度言えば足りる。部品ごとに出すと、表やカードを並べたセルで同じ警告が並ぶ。
+#
+# 真偽値を「見てから立てる」と、そのあいだに別のスレッドが同じ道を通る。
+# ``stale_module()`` は配布情報をディスクから読むので GIL を手放し、窓は実際に
+# 開く（32 スレッドから同時に呼んで 32 回出たのを実測した）。``_forms`` は押下ごとに
+# スレッドを立てて、その中で部品を描く。``list.pop()`` は GIL の下で原子的なので、
+# 取れた1人だけが言う。``threading`` を持ち込まずに済む（PyHiroba は Pyodide で、
+# ui 側が import してよいものを tests/test_ai.py が見張っている）。
+_stale_unsaid = [True]
 
 
 def _stale_notice() -> str:
@@ -132,13 +144,15 @@ def _stale_notice() -> str:
     ``ui.table`` / ``ui.quiz`` / ``ui.html`` / ``ai.*``）にも広げるための入口。
     フォームを使わない生徒は、古いままの画面を見ながら何も知らされなかった。
     """
-    global _said_stale
-    if _said_stale:
-        return ""
+    # 先に食い違いを見る。言うことが無い回で権利を使ってしまうと、セルの途中で
+    # ``%pip install -U`` した生徒に、そのあと一度も知らせられなくなる
     message = stale_module()
     if not message:
         return ""
-    _said_stale = True
+    try:
+        _stale_unsaid.pop()
+    except IndexError:
+        return ""
     # _components は _core を取り込むので、ここで初めて読む（循環を避ける）
     from ._components import alert
 

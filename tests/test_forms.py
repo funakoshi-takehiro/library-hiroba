@@ -1027,7 +1027,7 @@ def test_the_stale_notice_names_both_versions_and_what_to_do(monkeypatch):
     import importlib.metadata as meta
 
     import library_hiroba
-    from library_hiroba._forms import stale_module
+    from library_hiroba._core import stale_module
 
     monkeypatch.setattr(meta, "version", lambda name: "9.9.9")
     message = stale_module()
@@ -1037,7 +1037,7 @@ def test_the_stale_notice_names_both_versions_and_what_to_do(monkeypatch):
 
 def test_nothing_is_said_when_the_versions_agree():
     """版が合っているときは何も言わないこと。"""
-    from library_hiroba._forms import stale_module
+    from library_hiroba._core import stale_module
 
     assert stale_module() == ""
 
@@ -1046,7 +1046,7 @@ def test_nothing_is_said_when_there_is_no_distribution(monkeypatch):
     """PyHiroba は同梱で配布情報を持たない。そこでは何も言わないこと。"""
     import importlib.metadata as meta
 
-    from library_hiroba._forms import stale_module
+    from library_hiroba._core import stale_module
 
     def missing(name):
         raise meta.PackageNotFoundError(name)
@@ -1107,3 +1107,89 @@ def test_clear_on_submit_empties_number_fields_too(fake_ipython, monkeypatch):
 def test_widget_inputs_are_usable_with_a_finger(declaration, why):
     """Colab（ipywidgets 経路）の入力欄も、タブレットで無理なく使えること。"""
     assert declaration in widgets_css(), why
+
+
+def _form_parts(fake_ipython):
+    """表示された VBox から、入力欄すべてと送信ボタンを取り出す。"""
+    children = fake_ipython.displayed[0]["vbox"]
+    button = next(c for c in children if getattr(c, "fn", None) is not None)
+    controls = [
+        c
+        for c in children
+        if c is not button and hasattr(c, "kwargs") and "description" in c.kwargs
+    ]
+    return controls, button
+
+
+def test_a_rejected_value_stays_on_screen(fake_ipython, monkeypatch):
+    """入力の誤りで弾かれたとき、原因になった値を消してはいけない（B3）。
+
+    欄を空にするのを submit() の**前**に置くと、警告が指している値が画面から
+    消える。生徒は「数を入力してください」と空欄だけを見て、何を書き間違えたのか
+    確かめられない。
+    """
+    fake_ipywidgets(monkeypatch)
+
+    def handler(namae, kazu):
+        return ui.card("受付", f"{namae} / {kazu}")
+
+    ui.form(
+        handler,
+        ui.field("namae", label="名前"),
+        ui.field("kazu", label="数", kind="number"),
+        clear_on_submit=True,
+    )._ipython_display_()
+    (namae, kazu), button = _form_parts(fake_ipython)
+    namae.value, kazu.value = "佐藤", "さん"  # 数の欄に文字
+    button.fn(None)
+    settle()
+
+    assert "数" in output_html(fake_ipython)  # 警告は出る
+    assert kazu.value == "さん", "警告が指している値が消えると、直すところが分からない"
+    assert namae.value == "佐藤"
+
+
+def test_a_rejected_press_does_not_kill_a_running_answer(fake_ipython, monkeypatch):
+    """失敗した押下で回数を進めると、走っている答えが stale として打ち切られる（B1）。
+
+    clear_on_submit で欄が空になったあとに押すと必ず失敗する。そのとき回数まで
+    進むと、出ていた（あるいは生成中の）答えが警告に置き換わってしまう。
+    """
+    fake_ipywidgets(monkeypatch)
+
+    def handler(kazu):
+        return ui.card("答え", kazu)
+
+    form = ui.form(handler, ui.field("kazu", label="数", kind="number"), clear_on_submit=True)
+    form._ipython_display_()
+    (kazu,), button = _form_parts(fake_ipython)
+
+    kazu.value = "7"
+    button.fn(None)
+    settle()
+    assert "7" in output_html(fake_ipython)
+    after_success = form._run
+
+    button.fn(None)  # 空欄のまま2回目
+    settle()
+    assert form._run == after_success, "失敗した押下で回数を進めてはいけない"
+
+
+def test_the_version_notice_appears_once_on_the_form(fake_ipython, monkeypatch):
+    """フォームが自分で alert を組むと、その _repr_html_ がもう1枚同じ警告を足す。"""
+    import importlib.metadata as meta
+
+    from library_hiroba import _core
+
+    real = meta.version
+    monkeypatch.setattr(
+        meta, "version", lambda name: "9.9.9" if name == "library-hiroba" else real(name)
+    )
+    monkeypatch.setattr(_core, "_stale_unsaid", [True])
+    fake_ipywidgets(monkeypatch)
+
+    make_form()._ipython_display_()
+    shown = "".join(
+        getattr(c, "value", "") for c in fake_ipython.displayed[0]["vbox"] if hasattr(c, "value")
+    )
+    assert shown.count("セッションを再起動する") == 1
