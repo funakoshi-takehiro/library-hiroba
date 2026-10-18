@@ -41,6 +41,8 @@ PyHiroba 本体は library-hiroba を同梱（vendoring）して配ります。�
 - **サニタイザに落とされるものは、ライブラリ側でも受け付けません**。部品の出力にそれらが含まれないことは以前から `tests/sanitize_check.py` で固定していますが、0.4.0 からは唯一エスケープしない経路である `ui.html()` も、`<script>` などのタグ・`on*` 属性・`javascript:` URL を見つけた時点で `ValueError` にします。本体のサニタイザが無い Colab で書いて、PyHiroba に載せて初めて消えているのに気付く、という順序を避けるためです。禁止タグの一覧は本体側と揃える必要があるので、変えるときは連絡してください（`src/library_hiroba/_components.py` の `DANGEROUS_TAGS`）
 - **`ui` が使う標準ライブラリに `threading` が入りました**（0.5.1）。使うのは Colab・Jupyter の ipywidgets 経路だけです。Colab はセルの実行が終わっているあいだイベントループを回しておらず、ボタンの押下から予約したタスクが走らないため、自前のループを別スレッドで回しています。**PyHiroba には IPython も ipywidgets も無いのでこの経路に入らず、Pyodide 上でスレッドを作ることはありません。** `import threading` 自体も関数の中まで遅らせてあります
 - **`ui` が使う標準ライブラリに `importlib.metadata` が入りました**（0.8.3）。`ui.form()` を出すときに「ディスク上の版」と「読み込み済みの版」を比べ、食い違っていたら画面に再起動をうながすためです。Colab で `%pip install -U` した人が、再起動していないせいで直った版が反映されない、という形に3回なりました。**同梱の PyHiroba には配布情報が無く、`PackageNotFoundError` になるので何も表示しません。**
+- **`ui.html(css=...)` が出す CSS の形が変わりました**（0.9.0）。以前は利用者の CSS 全体を `.hui-raw-XXXX { ... }` で囲む **CSS ネスト**でしたが、いまは**セレクタ一つずつに `.hui-raw-XXXX ` を前置**した、ネストを使わない平たい CSS を出します。`@media` などの中も同じように前置して出します。PyHiroba はこの CSS をページと同じ document に挿すので、形が変わったことだけお知らせします（**本体側の対応は不要です**）。
+  - 変えた理由は2つです。**(1) 古い端末で効かない**：CSS ネストは Chrome 112 / Safari 16.5 より前には無く、要素名から始まるセレクタ（`p { ... }` など）は Chrome 120 / Safari 17.2 より前では読み飛ばされます。GIGA 端末の更新が止まっている学校では、囲んだ CSS が丸ごと無効になっていました。**(2) 囲みから抜け出せた**：CSS の文字列の中に `}` を書くと、囲みの括弧を閉じてしまい、ページ全体に効く CSS を書けました（`ui.html()` は教材を書く人が自分で書くものなので、生徒からの攻撃ではありませんが、教材のミスが PyHiroba の画面全体を壊す形になります）。いまは `@import` のような外に出る指定を落とし、スコープを付けられない書き方は `ValueError` にします
 - **`ai` は使われるまで読み込みません**。`from library_hiroba import ui` だけなら `_ai.py` は読み込まれません
 - `_ai.py` はブラウザでは `js` しか使いません。`transformers` / `torch` を読み込むのは Colab 経路に入ったときだけです
 
@@ -127,14 +129,14 @@ self.pyhirobaFeatures = 'forms,ai,ai-probe'
 
 ### 端末を調べる（任意）
 
-`ai.recommend()` と `ai.load("auto")` は、その端末で実用になるモデルのうちいちばん良いものを選びます。WebGPU の無い端末に 1.7B を読ませると画面が固まり、逆に動く端末で 150M を使うと答えが不自然になるためです。**対応は任意です** — 本体が知らなければ「調べられなかった」として、環境によらず既定の `qwen05` に落ちます。
+`ai.recommend()` と `ai.load("auto")` は、その端末で実用になるモデルのうちいちばん良いものを選びます。WebGPU の無い端末に 1.7B を読ませると画面が固まり、逆に動く端末で 150M を使うと答えが不自然になるためです。**対応は任意です** — 本体が知らなければ「調べられなかった」として、環境によらず既定の `llmjp150m` に落ちます（0.9.2 で `qwen05` から変更。既定は環境を調べずに読むので、**WebGPU を要らない唯一のモデル**にしました。Safari の WebGPU は iPadOS 26 以降でないと有効にならないため、そこへ上げられない端末では `qwen05` が読めませんでした）。
 
 | `kind` | 渡す JSON | 期待する JSON |
 |---|---|---|
 | `ai-probe` | `{}` | `{"webgpu": true, "memoryGB": 8, "cores": 12, "storageMB": 40000, "browser": "Chrome 120"}` |
 
 - **`webgpu` だけが必須**です。これが入っていない返事は「答えられなかった」とみなします（`{}` を返せば未対応と伝わるので、**そのために何かを実装する必要はありません**）
-- ほかの4つは省略できます。省いた項目は判断に使いません。ただし `memoryGB` が無いときは、外れたときの影響が大きいので既定より重いモデルは選びません
+- ほかの4つは省略できます。省いた項目は判断に使いません。ただし `memoryGB` が無いときは、外れたときの影響が大きいので既定より重いモデルは選びません（0.9.2 で既定が `llmjp150m` になったため、`memoryGB` を返さない端末では**いちばん軽いものが選ばれます**。Safari は `navigator.deviceMemory` を持たないので iPad は常にこの道を通ります。返していただけると、その端末で動く範囲のいちばん良いものを選べます）
 - 数値以外（文字列など）が入っていた項目は、無かったものとして扱います
 - 調べるのは端末の余力だけです。**利用者の入力や閲覧履歴に類するものは送らないでください**
 
@@ -147,12 +149,14 @@ return JSON.stringify({
   webgpu: !!adapter,
   memoryGB: navigator.deviceMemory ?? null,       // Firefox / Safari には無い
   cores: navigator.hardwareConcurrency ?? null,
-  storageMB: room ? Math.floor((room.quota - room.usage) / 1048576) : null,
+  storageMB: room ? Math.floor((room.quota - room.usage) / 1e6) : null,   // 10 進の MB
   browser: "Chrome 120",                          // 表示に使うだけ。省略可
 })
 ```
 
 `requestAdapter()` は WebGPU が無効な環境で `null` を返します（例外にはなりません）。`navigator.gpu` 自体が無いこともあるので、上のように先に確かめてください。
+
+> **`storageMB` は 10 進の MB（1MB = 1,000,000 バイト）です。** 以前この例は `1048576`（MiB）で割っていました。こちら側の `approx_mb` と空き容量の下限はすべて 10 進の MB なので、MiB で返すと同じバイト数でも約5%小さい数になり、足りているのに弾くことがあります（弾く側に外れるので危険ではありませんが、揃えておきます）。0.9.2 で例を直しました。
 
 ### モデルの名前
 
@@ -160,13 +164,24 @@ return JSON.stringify({
 
 | 利用者が書く名前 | 本体に渡る名前 | 本体が読む ONNX | Colab で使う ID |
 |---|---|---|---|
-| `qwen05`（既定） | `qwen05-q8` | `onnx-community/Qwen2.5-0.5B-Instruct` | `Qwen/Qwen2.5-0.5B-Instruct` |
+| `llmjp150m`（**既定**） | `llmjp150m-q4` | `onnx-community/llm-jp-3-150m-instruct2-ONNX` | `llm-jp/llm-jp-3-150m-instruct2` |
+| `qwen05` | `qwen05-q8` | `onnx-community/Qwen2.5-0.5B-Instruct` | `Qwen/Qwen2.5-0.5B-Instruct` |
 | `qwen05-q4` | `qwen05-q4` | 同上（q4 の重み） | `Qwen/Qwen2.5-0.5B-Instruct` |
-| `qwen15` | `qwen15-q4` | `onnx-community/Qwen2.5-1.5B-Instruct` | `Qwen/Qwen2.5-1.5B-Instruct` |
+| `qwen35_08` | `qwen35_08-q4` | `onnx-community/Qwen3.5-0.8B-Text-ONNX` | `Qwen/Qwen3.5-0.8B` |
+| `qwen35_08-q4f16` | `qwen35_08-q4f16` | 同上（q4f16 の重み） | `Qwen/Qwen3.5-0.8B` |
 | `qwen3_06` | `qwen3_06-q8` | `onnx-community/Qwen3-0.6B-ONNX` | `Qwen/Qwen3-0.6B` |
 | `qwen3_06-q4` | `qwen3_06-q4` | 同上（q4 の重み） | `Qwen/Qwen3-0.6B` |
+| `sarashina05` | `sarashina05-q8` | `onnx-community/sarashina2.2-0.5b-instruct-v0.1-ONNX` ← **未対応。下記参照** | `sbintuitions/sarashina2.2-0.5b-instruct-v0.1` |
+| `qwen15` | `qwen15-q4` | `onnx-community/Qwen2.5-1.5B-Instruct` | `Qwen/Qwen2.5-1.5B-Instruct` |
 | `qwen3_17` | `qwen3_17-q4` | `onnx-community/Qwen3-1.7B-ONNX` | `Qwen/Qwen3-1.7B` |
-| `llmjp150m` | `llmjp150m-q4` | `onnx-community/llm-jp-3-150m-instruct2-ONNX` | `llm-jp/llm-jp-3-150m-instruct2` |
+| `qwen3_4b` | `qwen3_4b-q4f16` | `onnx-community/Qwen3-4B-Instruct-2507-ONNX` | `Qwen/Qwen3-4B-Instruct-2507` |
+
+この表は 0.7.0 以降に足したぶん（`qwen35_08` / `qwen3_4b`）が抜けていました。0.9.2 で書き足しています。
+
+> **`sarashina05-q8` は本体側が未対応です（0.9.2 時点）。** 足していただけるまで、こちらは
+> Colab 経路でだけ動く扱いにしてあります。`ai.load("sarashina05")` はブラウザでは本体に
+> 断られますが、0.9.1 から「もっと軽いものがある」という案内を添えて返します。
+> おまかせ（`auto`）では選ばないので、知らないままでも害はありません。
 
 精度まで指定されたときは、その指定をそのまま尊重して渡します。一覧に無い名前は本体に届く前に `ValueError` にします。
 

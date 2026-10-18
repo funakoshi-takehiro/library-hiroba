@@ -16,6 +16,7 @@ from conftest import sample_widgets
 from sanitize_check import check_html
 
 from library_hiroba import ui
+from library_hiroba._ai import DEFAULT_MODEL, MODELS
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -203,3 +204,36 @@ def test_the_workflows_actually_install_the_ai_extra(workflow):
     text = (ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8")
     assert '".[dev,ai]"' in text, f"{workflow} が ai extra を入れていません"
     assert "HIROBA_REQUIRE_AI" in text, f"{workflow} が HIROBA_REQUIRE_AI を立てていません"
+
+
+def test_the_contract_table_lists_every_model():
+    """``docs/PYHIROBA_INTEGRATION.md`` の表が `MODELS` とずれていないこと。
+
+    本体（PyHiroba）はこの表を見て、どの名前を受け取るか・どの ONNX を読むかを
+    決める。README の表は検査していたのにここは検査しておらず、0.7.0 で足した
+    `qwen35_08` と `qwen3_4b` が**2版ぶん表から抜けたまま**になっていた。
+    """
+    doc = (ROOT / "docs" / "PYHIROBA_INTEGRATION.md").read_text(encoding="utf-8")
+    rows = {
+        m.group(1): m.group(0)
+        for m in re.finditer(r"^\|\s*`([a-z0-9_]+)`[^|]*\|.*$", doc, re.M)
+    }
+    for name, spec in MODELS.items():
+        assert name in rows, f"{name} が契約文書の表にありません"
+        row = rows[name]
+        for field in ("browser_key", "browser_repo", "colab_id"):
+            assert spec[field] in row, (
+                f"{name} の行に {field}={spec[field]} が入っていません: {row[:120]}"
+            )
+
+
+def test_the_contract_names_the_real_default():
+    """契約文書が本体に伝える既定が、実際の既定と一致していること。
+
+    本体は「調べられなかったとき」の落としどころとしてこの名前を見る。
+    食い違うと、本体側の作りとこちら側の判断がずれる。
+    """
+    doc = (ROOT / "docs" / "PYHIROBA_INTEGRATION.md").read_text(encoding="utf-8")
+    assert f"既定の `{DEFAULT_MODEL}` に落ちます" in doc, (
+        f"契約文書が既定を `{DEFAULT_MODEL}` と書いていません"
+    )
