@@ -61,3 +61,29 @@ def test_the_table_is_ordered_lightest_first():
     # DOCUMENTED は表の並び順のまま作っている（辞書は入れた順を保つ）
     order = [DOCUMENTED[name]["browser"] for name in DOCUMENTED]
     assert order == sorted(order), f"ブラウザ側の通信量が昇順になっていません: {order}"
+
+
+def test_the_default_is_marked_in_the_table():
+    """表の「（既定）」印が、実際の既定と一致していること。
+
+    既定を入れ替えたのに印が残っていると、README を読んで通信量を見積もった人が
+    別のモデルの数字で判断してしまう。印は1つだけにする。
+    """
+    from library_hiroba._ai import DEFAULT_MODEL
+
+    marked = re.findall(r"^\|\s*`([a-z0-9_]+)`（既定）", README, re.M)
+    assert marked == [DEFAULT_MODEL], (
+        f"表の「（既定）」は {marked}、実際の既定は {DEFAULT_MODEL} です"
+    )
+
+
+def test_models_held_back_from_auto_are_listed_as_such():
+    """おまかせで選ばれないモデルが、README でもそう書かれていること。"""
+    from library_hiroba._ai import auto_ok
+
+    held = sorted(name for name in MODELS if not auto_ok(name))
+    section = README[README.find("選ばれません") - 400 : README.find("選ばれません") + 80]
+    for name in held:
+        assert f"`{name}`" in section, (
+            f"{name} はおまかせで選ばれないのに、README の「選ばれません」の説明に出てきません"
+        )

@@ -158,7 +158,7 @@ def test_ui_stays_dependency_free():
 
 def test_both_naming_schemes_are_accepted():
     """ブラウザ側の -q8 / -q4 付きも、共通の名前も受け付ける。"""
-    assert _ai.resolve(None) == ("qwen05", "qwen05-q8")
+    assert _ai.resolve(None) == ("llmjp150m", "llmjp150m-q4")  # 既定
     assert _ai.resolve("qwen05") == ("qwen05", "qwen05-q8")
     assert _ai.resolve("qwen05-q8") == ("qwen05", "qwen05-q8")
     # 精度まで指定されたらその指定を尊重する
@@ -936,9 +936,10 @@ def colab_env(**changes):
 @pytest.mark.parametrize(
     "found,expected",
     [
-        # 調べられなかったら、環境によらず標準のものに落ちる
-        ({"known": False}, "qwen05"),
-        ({}, "qwen05"),
+        # 調べられなかったら、環境によらず標準のものに落ちる。標準は
+        # 「どの端末でも動くもの」なので、ここは一覧でいちばん軽いものになる
+        ({"known": False}, "llmjp150m"),
+        ({}, "llmjp150m"),
         # ブラウザ。WebGPU が無ければ WASM でも待てる 150M まで落とす
         (browser_env(), "qwen3_17"),
         (browser_env(webgpu=False), "llmjp150m"),
@@ -2326,3 +2327,30 @@ def test_the_label_and_the_auto_flag_agree(name):
         f"{name}: ラベルは{'「名前を書いたときだけ」と言っている' if by_name_only else '何も言っていない'}"
         f"のに auto は {spec.get('auto', True)} です"
     )
+
+
+def test_the_default_model_runs_without_webgpu():
+    """既定は、環境を調べずに読むのだから**どの端末でも動く**ものであること。
+
+    ``ai.load()`` と、読み込まずに呼んだ ``ai.ask()`` は環境を見ない。
+    そこで WebGPU の要るモデルを既定にすると、Safari の WebGPU が iPadOS 26 以降
+    でないと有効にならないため、そこへ上げられない GIGA の iPad では
+    **何も動かない**（本体に断られる）。
+    """
+    spec = _ai.MODELS[_ai.DEFAULT_MODEL]
+    assert spec["needs"]["browser"]["webgpu"] is False, (
+        f"既定の {_ai.DEFAULT_MODEL} が WebGPU を要求しています。"
+        "WebGPU の無い端末では ai.load() が通りません"
+    )
+    assert _ai.auto_ok(_ai.DEFAULT_MODEL), "既定がおまかせの対象外になっています"
+
+
+def test_the_default_is_the_lightest_thing_that_runs_anywhere():
+    """既定は、WebGPU 不要なもののうち最も良いものであること。
+
+    「どこでも動く」を満たすものが複数あるなら、そのうち質の高いほうを採る。
+    いまは WebGPU 不要が1つしか無いので、結果として一覧の最軽量になる。
+    """
+    anywhere = [n for n in _ai._RANKED if not _ai.MODELS[n]["needs"]["browser"]["webgpu"]]
+    assert anywhere, "WebGPU 無しで動くモデルが一覧から消えています"
+    assert _ai.DEFAULT_MODEL == max(anywhere, key=lambda n: _ai.MODELS[n]["rank"])
