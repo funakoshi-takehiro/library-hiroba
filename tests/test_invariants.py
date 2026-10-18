@@ -141,9 +141,12 @@ def test_the_ai_extra_declares_lower_bounds():
     tomllib は 3.11 からで、この package は 3.9 も対象なので使わない。
     """
     text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    line = re.search(r"^ai = \[(.*)\]$", text, re.M)
-    assert line, "pyproject.toml に ai extra が見つかりません"
-    for requirement in re.findall(r'"([^"]+)"', line.group(1)):
+    # 1行でも複数行でも読めるようにする（依存が増えると1行に収まらない）
+    block = re.search(r"^ai = \[(.*?)^\]$|^ai = \[(.*)\]$", text, re.M | re.S)
+    assert block, "pyproject.toml に ai extra が見つかりません"
+    found = re.findall(r'"([^"]+)"', block.group(1) or block.group(2))
+    assert found, "ai extra の中身を読み取れませんでした（書式が変わった？）"
+    for requirement in found:
         assert ">=" in requirement, f"{requirement} に版の下限がありません"
 
 

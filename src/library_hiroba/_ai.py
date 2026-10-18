@@ -71,6 +71,23 @@ __all__ = ["Ai", "ai"]
 # ``rank`` と ``needs`` は ``recommend()`` が使う（下の「おすすめを選ぶ」参照）。
 #   rank  … 答えの質の順。大きいほど良い。重なりが無いこと（テストで固定）
 #   needs … その環境で実用になる最低条件。approx_mb から機械的に出さず手で書く。
+#
+# **``needs`` の ``memory_gb`` は実機で測り直していない。** 2026-10-18 に通信量を
+# 測ったところ、要求メモリと実サイズの並びが合っていないことが分かった:
+#       llmjp150m   268MB → 1GB
+#       qwen05      512MB → 4GB     ← 小さいのに要求が大きい
+#       qwen35_08   551MB → 4GB     ← 同じ
+#       qwen3_06    618MB → 2GB     ← 大きいのに要求が小さい
+# このため 2〜3GB と報告する端末では、より小さくて新しい qwen35_08 が外れて
+# qwen3_06 が選ばれる。壊れはしないが、必要以上に劣るモデルになる。
+# 数字を直すには GIGA 端末での実測（読み込み時の実使用量）が要るので、
+# **測るまで動かさない**。当てずっぽうで書き換えると、動いていた端末で
+# 動かなくなるほうへ転びうる。tools/check_model_sizes.py がこの並びの崩れを
+# 毎回表示するので、測れた人が直せる。
+#
+# ``storage_mb`` のほうは測った通信量から出せるので、**実サイズの 1.5 倍以上**に
+# そろえてある（ブラウザがキャッシュに置く分＋展開中の余地）。下げる向きには
+# 動かさない。同じ検査がこの下限も見る。
 #           通信量と、動かすのに要るものは比例しないため（量子化の効き方が違う）。
 #           browser: webgpu は True なら必須、False なら無くても動く
 #           colab:   vram_gb は None なら GPU 不要、数値なら GPU が要る
@@ -99,7 +116,7 @@ MODELS = {
         "approx_mb": {"browser": 1800, "colab": 3100},
         "rank": 4,
         "needs": {
-            "browser": {"webgpu": True, "memory_gb": 8, "storage_mb": 2400},
+            "browser": {"webgpu": True, "memory_gb": 8, "storage_mb": 2700},
             # CPU だけで 1.5B を動かすと1回の返事に数分かかる。授業では待てない
             "colab": {"ram_gb": 8, "vram_gb": 4},
         },
@@ -127,7 +144,7 @@ MODELS = {
         # ただし実際に動く／動かないは実機でしか分からないため、値は当てずっぽうで
         # 動かさず据え置く。低スペック機で確かめてから決めること
         "needs": {
-            "browser": {"webgpu": True, "memory_gb": 2, "storage_mb": 900},
+            "browser": {"webgpu": True, "memory_gb": 2, "storage_mb": 1000},
             "colab": {"ram_gb": 4, "vram_gb": None},
         },
     },
@@ -138,11 +155,11 @@ MODELS = {
         "browser_repo": "onnx-community/Qwen3-1.7B-ONNX",
         "browser_key": "qwen3_17-q4",
         "browser_variants": ("qwen3_17-q4",),
-        "approx_mb": {"browser": 2200, "colab": 3400},
+        "approx_mb": {"browser": 2200, "colab": 4100},
         "has_thinking": True,
-        "rank": 6,
+        "rank": 7,
         "needs": {
-            "browser": {"webgpu": True, "memory_gb": 8, "storage_mb": 2700},
+            "browser": {"webgpu": True, "memory_gb": 8, "storage_mb": 3300},
             "colab": {"ram_gb": 8, "vram_gb": 4},
         },
     },
@@ -168,7 +185,7 @@ MODELS = {
         "has_thinking": True,
         "rank": 5,
         "needs": {
-            "browser": {"webgpu": True, "memory_gb": 4, "storage_mb": 800},
+            "browser": {"webgpu": True, "memory_gb": 4, "storage_mb": 900},
             "colab": {"ram_gb": 4, "vram_gb": None},
         },
     },
@@ -184,10 +201,51 @@ MODELS = {
         "browser_variants": ("qwen3_4b-q4f16", "qwen3_4b-q4"),
         "approx_mb": {"browser": 2900, "colab": 8100},
         "auto": False,
-        "rank": 7,
+        "rank": 8,
         "needs": {
-            "browser": {"webgpu": True, "memory_gb": 8, "storage_mb": 4000},
+            "browser": {"webgpu": True, "memory_gb": 8, "storage_mb": 4400},
             "colab": {"ram_gb": 16, "vram_gb": 12},
+        },
+    },
+    "sarashina05": {
+        # 国産（SB Intuitions）。**日本語はこの一覧でいちばん自然**。2026-10-18 に
+        # ライブラリと同じ生成設定・同じ revision で6問を実機比較した結果:
+        #   富士山の標高と県／光合成の仕組み／敬語の言い換え … このモデルだけ正答
+        #   『走れメロス』の友人名／1500÷3 … 不正解（下の注意を読むこと）
+        # 現行の小型4つ（llmjp150m・qwen05・qwen3_06・qwen35_08）は光合成・敬語・
+        # メロスを**全て**外した。公開ベンチ（SB Intuitions 公式・審判 GPT-4o・
+        # 9回平均）でも Japanese MT Bench 4.55 対 2.95（Qwen2.5-0.5B-instruct、
+        # つまり下の qwen05 そのもの）。
+        #
+        # **おまかせに入れない（auto: False）理由は2つ。**
+        # 1. 間違い方が危ない。1500÷3 で x+x+x=1500 と正しく立てた直後に 2x=1500 と
+        #    書いて 750 を出した。他のモデルは「答えない・崩れる」ので生徒が気付けるが、
+        #    これは筋道が通って見える。質が上がっても「AI の計算は確かめる」は変わらない。
+        # 2. 通信量が小型4つより大きい（795MB。qwen3_06 の約1.3倍）。教室の回線を
+        #    知っている人が決めることで、機械が勝手に決めてよい話ではない。
+        #
+        # **PyHiroba 本体はまだこの名前を知らない。** ブラウザ経路で使うには
+        # 本体側に sarashina05-q8 を足してもらう必要がある（docs/PYHIROBA_STATUS.md
+        # に依頼を書いてある）。それまでは Colab 経路でだけ動く。
+        #
+        # Colab 経路は SentencePiece のトークナイザ（tokenizer.model）なので
+        # sentencepiece と protobuf が要る。Qwen 系は tokenizer.json なので不要だった。
+        # 実際の Colab には両方入っているが、pyproject の ai extra に書いてある。
+        "label": "Sarashina2.2 0.5B（国産・日本語がいちばん自然／名前を書いたときだけ）",
+        "colab_id": "sbintuitions/sarashina2.2-0.5b-instruct-v0.1",
+        "colab_revision": "e4b9aacc3f644893d0179847946ef6c58d868f29",
+        "browser_repo": "onnx-community/sarashina2.2-0.5b-instruct-v0.1-ONNX",
+        # q8（model_quantized / model_int8 / model_uint8、いずれも 795MB）を既定に
+        # する。q4 は 939MB で**q8 より大きい** — 語彙が 102,400 あり、4bit 化の
+        # 対象から外れる埋め込み層が効くため。小さいほうを採る
+        "browser_key": "sarashina05-q8",
+        "browser_variants": ("sarashina05-q8", "sarashina05-q4"),
+        "approx_mb": {"browser": 800, "colab": 1600},
+        "rank": 6,
+        "auto": False,
+        "needs": {
+            "browser": {"webgpu": True, "memory_gb": 4, "storage_mb": 1200},
+            "colab": {"ram_gb": 4, "vram_gb": None},
         },
     },
     "llmjp150m": {
@@ -200,12 +258,12 @@ MODELS = {
         "browser_repo": "onnx-community/llm-jp-3-150m-instruct2-ONNX",
         "browser_key": "llmjp150m-q4",
         "browser_variants": ("llmjp150m-q4",),
-        "approx_mb": {"browser": 270, "colab": 600},
+        "approx_mb": {"browser": 270, "colab": 310},
         "rank": 1,
         # 150M なら WebGPU が無くても（WASM でも）待てる速さで返る。
         # これがあるおかげで「何も動かない環境」を作らずに済む
         "needs": {
-            "browser": {"webgpu": False, "memory_gb": 1, "storage_mb": 400},
+            "browser": {"webgpu": False, "memory_gb": 1, "storage_mb": 410},
             "colab": {"ram_gb": 2, "vram_gb": None},
         },
     },
@@ -485,6 +543,31 @@ _SAFEST = _RANKED[0]
 _UNMEASURED = {"browser": "この端末のメモリ", "colab": "この環境のメモリ"}
 
 
+def _next_step_after_refusal(browser_key: str) -> str:
+    """読み込みを断られたときに、次にやることを1行で返す。
+
+    現場で出ているのは「``ai-load`` を断りました: メモリが足りませんでした」で、
+    そこから先が書かれていない。名前を書いて読み込むときは :func:`choose` と違って
+    誰も端末の条件を見ていないので、**断られてから**軽いほうへ導く。
+    """
+    base = browser_key.rsplit("-", 1)[0]
+    spec = MODELS.get(base)
+    if spec is None:
+        return 'ai.load("auto") にすると、この端末で動くものを選びます。'
+    lighter = [
+        name
+        for name in _RANKED
+        if MODELS[name]["approx_mb"]["browser"] < spec["approx_mb"]["browser"]
+    ]
+    if not lighter:
+        return "この一覧でいちばん軽いモデルなので、この端末では AI を使えません。"
+    return (
+        f'ai.load("auto") にすると、この端末で動くものを選びます'
+        f"（{_short_label(lighter[-1])}なら {MODELS[lighter[-1]]['approx_mb']['browser']}MB で、"
+        f"{_short_label(base)}の {spec['approx_mb']['browser']}MB より軽いです）。"
+    )
+
+
 def _short_label(name: str) -> str:
     """理由の文に混ぜるための短い名前。
 
@@ -536,11 +619,14 @@ def _why(name: str, environment: dict) -> str:
     if not better:
         # 「一覧でいちばん賢い」とは言わない。auto から外したものが一覧には
         # 残っており（qwen3_4b）、そちらのほうが賢い。嘘になる
+        # 並び順ではなく rank で選ぶ。auto を切ったものが2つ以上あると、
+        # 辞書の並び順では「さらに上」でないものを指してしまう
         heavier = [n for n in MODELS if not auto_ok(n)]
         if heavier:
+            top = max(heavier, key=lambda other: MODELS[other]["rank"])
             return (
                 f"この環境なら、おまかせで選べるうちでいちばん賢い{_short_label(name)}が"
-                f"動きます。さらに上の{_short_label(heavier[-1])}は、"
+                f"動きます。さらに上の{_short_label(top)}は、"
                 "通信量が大きいので名前を書いたときだけ動きます。"
             )
         return f"この環境なら、一覧でいちばん賢い{_short_label(name)}が動きます。"
@@ -580,8 +666,11 @@ def choose(environment: dict) -> tuple[str, str]:
         if name != fits[-1]:
             where = environment.get("where", "colab")
             return name, (
+                # 「確実に動く」とは言えない。測れていないのだから、言えるのは
+                # 「控えめに選んだ」までで、保証ではない（下の needs の注意も参照）
                 f"{_UNMEASURED.get(where, 'メモリ')}が分からなかったので、"
-                f"確実に動く{_short_label(name)}を選びました。"
+                f"控えめに{_short_label(name)}を選びました。"
+                "もっと賢いものを使うときは、名前を書いて指定してください。"
             )
 
     return name, _why(name, environment)
@@ -1239,7 +1328,17 @@ class Ai:
     async def _load_in_browser(self, browser_key: str) -> str:
         import json
 
-        result = await self._call_host("ai-load", json.dumps({"model": browser_key}))
+        try:
+            result = await self._call_host("ai-load", json.dumps({"model": browser_key}))
+        except RuntimeError as error:
+            # 名前を書いて読み込むときは、おまかせ（choose）と違って誰も端末の
+            # 条件を見ていない。足りなくて断られたとき、次に何をすればよいかが
+            # 書かれていないと止まってしまう。現場で実際に出ているのがこれ。
+            #
+            # ここで環境を調べて先に警告することはしない。``ai.load()`` が環境を
+            # 見ないのは「同じ教材が環境ごとに違うモデルを読むと追えない」ための
+            # 約束で、tests/test_ai.py が見張っている。断られてからで十分間に合う。
+            raise RuntimeError(f"{error}\n{_next_step_after_refusal(browser_key)}") from error
         self._name = browser_key
         return result.get("message", "準備ができました")
 

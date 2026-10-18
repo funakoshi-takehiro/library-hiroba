@@ -2215,3 +2215,114 @@ def test_as_texts_still_takes_a_plain_list_of_strings():
     from library_hiroba._ai import as_texts
 
     assert as_texts(["あ", "い"], "texts") == ["あ", "い"]
+
+
+@pytest.mark.parametrize("name", sorted(_ai.MODELS))
+def test_the_storage_floor_covers_the_download(name):
+    """空き容量の下限が、落とす大きさの 1.5 倍を下回らないこと。
+
+    下回ると「容量は足りている」と判断して読み込み、キャッシュに入らずに
+    落ちる。倍率は実測の通信量から出せる（memory_gb と違って手書きではない）。
+    """
+    spec = _ai.MODELS[name]
+    floor = spec["needs"]["browser"]["storage_mb"]
+    want = spec["approx_mb"]["browser"] * 1.5
+    assert floor >= want, (
+        f"{name}: 空き容量の下限 {floor}MB が、通信量 "
+        f"{spec['approx_mb']['browser']}MB の1.5倍（{want:.0f}MB）に足りません"
+    )
+
+
+def test_the_reason_points_at_the_heaviest_model_not_the_last_one():
+    """「さらに上の◯◯」は rank で選ぶこと（辞書の並び順で選ばない）。
+
+    auto を切ったモデルが2つ以上あると、並び順では「さらに上」でないものを
+    指してしまい、軽いモデルを「通信量が大きい」と説明する嘘になる。
+    """
+    heavy = [n for n in _ai.MODELS if not _ai.auto_ok(n)]
+    assert len(heavy) >= 2, "auto を切ったモデルが1つだと、この検査は何も守っていない"
+    top = max(heavy, key=lambda n: _ai.MODELS[n]["rank"])
+    _name, reason = _ai.choose(browser_env(memory_gb=64, storage_mb=999999))
+    assert _ai._short_label(top) in reason
+    for other in heavy:
+        if other != top:
+            assert _ai._short_label(other) not in reason
+
+
+def test_it_does_not_promise_the_model_runs_when_memory_was_not_measured():
+    """測れていないのに「確実に動く」と言わないこと。
+
+    iPad は navigator.deviceMemory を持たないので、ブラウザ経路では常にこの道を
+    通る。選ばれる qwen05 は表自身が 4GB 必須としているモデルで、3GB の端末で
+    動く保証はどこにも無い。
+    """
+    _name, reason = _ai.choose(browser_env(memory_gb=None, storage_mb=None))
+    assert "分からなかった" in reason
+    assert "確実" not in reason
+
+
+@pytest.mark.parametrize(
+    ("browser_key", "expect"),
+    [
+        ("qwen3_17-q4", "軽いです"),  # もっと軽いものがある
+        ("llmjp150m-q4", "いちばん軽いモデル"),  # これ以上軽いものが無い
+        ("しらないなまえ-q4", 'ai.load("auto")'),  # 一覧に無くても案内はする
+    ],
+)
+def test_a_refused_load_says_what_to_do_next(browser_key, expect):
+    """「メモリが足りませんでした」だけで終わらせないこと。
+
+    名前を書いて読み込むときは choose() と違って誰も端末の条件を見ていない。
+    現場で出ているのがこの形で、そこから先が書かれていなかった。
+    """
+    assert expect in _ai._next_step_after_refusal(browser_key)
+
+
+def test_a_host_refusal_carries_the_next_step(fresh_ai, monkeypatch):
+    """本体が「メモリが足りませんでした」と断ったとき、次の一手まで届くこと。
+
+    現場で出ているのがこの形（RuntimeError: PyHiroba 本体が ai-load を断りました:
+    Error: メモリが足りませんでした。）で、そこから先が書かれていなかった。
+    """
+
+    async def refuse(kind, args_json):
+        raise RuntimeError("Error: メモリが足りませんでした。")
+
+    js = types.ModuleType("js")
+    js.pyhirobaAsk = refuse
+    monkeypatch.setitem(sys.modules, "js", js)
+
+    with pytest.raises(RuntimeError) as caught:
+        run(fresh_ai.load("qwen3_17"))
+    message = str(caught.value)
+    assert "メモリが足りませんでした" in message, "本体の理由を消してはいけない"
+    assert 'ai.load("auto")' in message, "次にやることが書かれていません"
+    assert "軽いです" in message
+
+
+def test_a_successful_load_is_not_decorated(fresh_ai, in_browser):
+    """断られていないときに、よけいな案内を足さないこと。"""
+    message = run(fresh_ai.load("qwen05"))
+    assert 'ai.load("auto")' not in message
+
+
+@pytest.mark.parametrize("name", sorted(_ai.MODELS))
+def test_the_label_and_the_auto_flag_agree(name):
+    """ラベルが「名前を書いたときだけ」と言うなら、``auto`` を切っていること。
+
+    ``auto`` を切り忘れても、上に rank の高いモデルがいるあいだは
+    ``choose()`` が選ばないので、環境を振る検査をすり抜ける
+    （変異テストで実際にすり抜けた）。ラベルと旗が食い違ったら落ちるようにする。
+
+    ``sarashina05`` をおまかせに入れていないのは2つの理由から:
+    1. 間違い方が危ない。1500÷3 で x+x+x=1500 と正しく立てた直後に 2x=1500 と
+       書いて 750 を出す。他のモデルは答えられずに止まるので生徒が気付けるが、
+       これは筋道が通って見える
+    2. 通信量が小型4つより大きい（795MB）。教室の回線を知っている人が決めること
+    """
+    spec = _ai.MODELS[name]
+    by_name_only = "名前を書いたとき" in spec["label"]
+    assert by_name_only == (not _ai.auto_ok(name)), (
+        f"{name}: ラベルは{'「名前を書いたときだけ」と言っている' if by_name_only else '何も言っていない'}"
+        f"のに auto は {spec.get('auto', True)} です"
+    )

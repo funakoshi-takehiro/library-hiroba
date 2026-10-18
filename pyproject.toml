@@ -47,7 +47,18 @@ Changelog = "https://github.com/funakoshi-takehiro/ui-hiroba/releases"
 #     KeyError: 'qwen3_5' という原因の分からない形で落ちる
 #     （qwen3_06 / qwen3_17 の Qwen3 は 4.51 以降。厳しいほうに合わせる）
 #   torch>=2.0 … transformers 4.51 自身が要求する下限
-ai = ["transformers>=4.57", "torch>=2.0"]
+#   sentencepiece / protobuf … MODELS の sarashina05 のトークナイザは
+#     SentencePiece（tokenizer.model）で、transformers 5 系はその展開に protobuf を
+#     使う。無いと tiktoken として読もうとして
+#     「Error parsing line b'\x0e'」という原因の分からない形で落ちる（実機で確認）。
+#     Qwen 系は tokenizer.json なのでどちらも要らなかった。Colab には両方入って
+#     いるが、書いておかないと「ある環境では動くが無い環境では落ちる」になる
+ai = [
+    "transformers>=4.57",
+    "torch>=2.0",
+    "sentencepiece>=0.1.99",
+    "protobuf>=3.20",
+]
 # ipywidgets は Colab 経路の検査に要る（本物を相手にしないと、手書きの代役が
 # 通ってしまう。実際それで「押しても何も起きない」を3回見逃した）
 dev = ["pytest", "ruff>=0.16", "build", "twine", "nbformat", "ipywidgets"]
