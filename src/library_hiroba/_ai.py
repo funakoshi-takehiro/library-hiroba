@@ -683,6 +683,12 @@ def choose(environment: dict) -> tuple[str, str]:
     else:
         # 測れなかった項目がある。動くと分かっている範囲で、標準より上には行かない。
         # 「たぶん動く」で重いものを選ぶと、外れたときに固まって授業が止まる
+        #
+        # この上限を DEFAULT_MODEL に結び付けたままにするのは意図（2026-10-18 判断）。
+        # 既定がいちばん軽いものになったため、メモリを答えない端末（Safari と
+        # Firefox には navigator.deviceMemory が無く、iPad は常にこの道を通る）では
+        # いちばん軽いものが選ばれる。専用の上限を別に置けば一段上を選べるが、
+        # 外れたときに授業が止まる側のリスクを取らない、という判断でそうしていない。
         allowed = [n for n in fits if MODELS[n]["rank"] <= MODELS[DEFAULT_MODEL]["rank"]]
         name = allowed[-1] if allowed else fits[0]
         if name != fits[-1]:
