@@ -108,6 +108,8 @@ def test_unknown_attribute_raises():
 # 気付けるよう、ここに並べておく（sys.stdlib_module_names は 3.10 以降にしか無い）。
 UI_MAY_IMPORT = {
     "__future__",
+    # ui.sketch() の中身を属性値で運ぶため（base64 にしないと DOMPurify が落とす）
+    "base64",
     "asyncio",
     "collections",
     "html",
@@ -115,6 +117,10 @@ UI_MAY_IMPORT = {
     # 配布情報が無ければ何も言わないので、同梱の PyHiroba では働かない
     "importlib",
     "inspect",
+    # Pyodide にだけ入る。本体が名乗る機能一覧（pyhirobaFeatures）を読むためで、
+    # 関数の中で try/except ImportError に包んでいる。Colab にも素の Python にも
+    # 無いので、そこでは「本体の機能はひとつも無い」として扱われる
+    "js",
     "keyword",
     "re",
     "secrets",

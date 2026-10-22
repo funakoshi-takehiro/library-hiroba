@@ -158,6 +158,24 @@ b { color: var(--hui-accent-ink); }
             ),
         ),
         (
+            "sketch（JavaScript を閉じた箱の中で動かす）",
+            ui.sketch(
+                '<canvas width="280" height="90"></canvas>',
+                css="body { padding: 0 } canvas { border-radius: 8px }",
+                js="""
+const ctx = document.querySelector('canvas').getContext('2d');
+for (let i = 0; i < 7; i++) {
+  ctx.fillStyle = i % 2 ? '#028DAE' : '#e6f4f7';
+  ctx.fillRect(i * 40, 0, 40, 90);
+}
+ctx.fillStyle = '#101418';
+ctx.font = '700 20px system-ui';
+ctx.fillText('canvas で描いた', 44, 52);
+""",
+                height=114,
+            ),
+        ),
+        (
             "組み合わせ（columns の中に card）",
             ui.columns(
                 ui.card("ステップ1", "変数に数を入れる"),

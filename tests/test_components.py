@@ -1074,3 +1074,188 @@ def test_css_brace_check_ignores_strings_and_comments():
     assert _css_has_brace("/* { */ .a") is False
     assert _css_has_brace(".a\\{b") is False
     assert _css_has_brace(".a .b > .c:hover") is False
+
+
+# --- ui.sketch()（JavaScript を動かす閉じた箱）-------------------------------
+
+
+def sketch_frame(widget) -> str:
+    """出力から iframe のタグだけ取り出す。"""
+    found = re.search(r"<iframe[^>]*>", widget._repr_html_())
+    assert found, "iframe が出ていません"
+    return found.group(0)
+
+
+def test_sketch_puts_the_js_in_a_sandboxed_frame():
+    """JS は箱の中に入り、出力はサニタイザの検査を通ること。"""
+    widget = ui.sketch("<canvas></canvas>", js="window.x = 1")
+    rendered = widget._repr_html_()
+    assert check_html(rendered) == []
+    frame = sketch_frame(widget)
+    assert 'sandbox="allow-scripts allow-modals allow-forms"' in frame
+    assert "src=" not in frame.replace("srcdoc=", "")
+    # JS は srcdoc の中（＝エスケープされた形）にだけある
+    assert "window.x = 1" in rendered
+    assert "<script" not in rendered.lower()
+    assert "&lt;script&gt;" in rendered
+
+
+def test_sketch_never_grants_same_origin():
+    """``allow-same-origin`` を足さないこと。
+
+    閉じた箱の安全は**この一点だけ**で成り立っている。足すと箱は親と同じ
+    オリジンになり、実測で止まっていたもの（親の DOM・親の変数・cookie・
+    親ページの遷移）が**全部通る**。「JS を動かす」と「親に触らせない」を
+    同時に満たしているのはここなので、ここが崩れたら設計から考え直すこと。
+    実物の Chromium での確認は tools/check_sketch_browser.py。
+    """
+    for widget in (
+        ui.sketch("x", js="1"),
+        ui.sketch("x", js="1", height=500, width="300px"),
+        ui.sketch(js="1"),
+    ):
+        assert "allow-same-origin" not in widget._repr_html_()
+
+
+def test_the_sandbox_value_matches_the_checker():
+    """``sandbox`` の約束を、ライブラリと検査の両方が同じ値で持っていること。
+
+    検査側だけ緩めると、``allow-same-origin`` の入った箱が素通りする。
+    片方を直したら必ず両方を直す（DANGEROUS_TAGS と同じ扱い）。
+    """
+    import sanitize_check
+
+    from library_hiroba._components import SKETCH_SANDBOX
+
+    assert SKETCH_SANDBOX == sanitize_check.SKETCH_SANDBOX
+
+
+def test_the_checker_catches_a_frame_that_breaks_the_promise():
+    """検査そのものが働くこと（素通しなら上のテストは無意味になる）。"""
+    assert check_html('<iframe srcdoc="x"></iframe>') != []
+    assert check_html('<iframe sandbox="allow-scripts allow-same-origin"></iframe>') != []
+    assert check_html('<iframe sandbox="allow-scripts allow-modals allow-forms" src="/x">') != []
+    assert check_html('<iframe sandbox="allow-scripts allow-modals allow-forms"></iframe>') == []
+
+
+def test_sketch_refuses_a_script_end_tag_in_the_js():
+    """``</script>`` があると JS が途中で切れる。書いた時点で止める。
+
+    HTML のパーサは文字列の中の ``</script>`` も見分けない。実測では
+    「Invalid or unexpected token」になり、箱の中は真っ白なまま理由が出ない。
+    """
+    with pytest.raises(ValueError, match="</script>"):
+        ui.sketch(js='const s = "</script>"')
+    with pytest.raises(ValueError, match="</script>"):
+        ui.sketch(js="x = '</ SCRIPT >'")
+    # 逃がしてあるものは通る
+    assert ui.sketch(js='const s = "<\\/script>"')._repr_html_()
+
+
+def test_sketch_neutralises_a_style_end_tag_in_the_css():
+    """箱の中の ``<style>`` も ``</style>`` で終わってしまうので、無害化する。"""
+    widget = ui.sketch("x", css="body { color: red } /* </style><b>は */")
+    assert "</style><b>" not in widget.document()
+    assert "<\\/style" in widget.document()
+
+
+def test_sketch_hands_the_box_to_the_host_in_pyhiroba(monkeypatch):
+    """PyHiroba では iframe を出さず、中身を ``data-hui-sketch`` で渡すこと。
+
+    iframe をそのまま出すと本体のサニタイザが消す。``srcdoc`` は値の中の
+    ``</script`` を見て落とされ、フックでも残せない（その検査がフックより
+    手前にある）。``data-*`` 属性は**設定を変えなくても残る**ので、base64 に
+    してそこへ載せ、iframe は本体の JS に組んでもらう。
+    """
+    from library_hiroba import _components
+
+    monkeypatch.setattr(_components, "in_browser", lambda: True)
+    monkeypatch.setattr(_components, "host_supports", lambda feature: feature == "sketch")
+    widget = ui.sketch("<canvas></canvas>", js="window.x = 1")
+    shown = widget._repr_html_()
+    assert check_html(shown) == []
+    assert "<iframe" not in shown
+    assert f'data-hui-sketch="{widget.packed()}"' in shown
+    # base64 なので、落とされる形（</script や --> ）が値に出ない
+    packed = re.search(r'data-hui-sketch="([^"]*)"', shown).group(1)
+    assert re.fullmatch(r"[A-Za-z0-9+/=]+", packed), packed
+    # 往復すること
+    import base64
+
+    assert base64.b64decode(packed).decode("utf-8") == widget.document()
+    assert "window.x = 1" in widget.document()
+
+
+def test_sketch_says_so_where_it_cannot_work(monkeypatch):
+    """対応していない本体では、黙って消えずに理由を出すこと。
+
+    iframe は本体のサニタイザで取り除かれる。何も出さないと「Colab では
+    動いたのに PyHiroba では無反応」になり、原因がどこにも出ない。
+    """
+    from library_hiroba import _components
+
+    # 未対応の PyHiroba
+    monkeypatch.setattr(_components, "in_browser", lambda: True)
+    monkeypatch.setattr(_components, "host_supports", lambda feature: False)
+    shown = ui.sketch("x", js="1")._repr_html_()
+    assert "<iframe" not in shown
+    assert "hui-alert-warning" in shown
+    assert "ui.sketch" in shown
+    # 注意書きの見た目に要る CSS も一緒に出ていること（入れ忘れると素の文字になる）
+    assert ".hui-alert{" in shown
+
+    # 対応済みの本体。ここに注意書きを出してはいけない
+    monkeypatch.setattr(_components, "host_supports", lambda feature: feature == "sketch")
+    shown = ui.sketch("x", js="1")._repr_html_()
+    assert "data-hui-sketch=" in shown
+    assert "hui-alert" not in shown
+
+
+def test_sketch_size_takes_a_number_or_a_length():
+    assert "height: 300px" in ui.sketch("x", height=300).extra_css()
+    assert "height: 50vh" in ui.sketch("x", height="50vh").extra_css()
+    assert "width: 320px" in ui.sketch("x", width=320).extra_css()
+    # 幅を指定しなければ、幅の指定は出さない（部品側の 100% が効く）
+    assert "width" not in ui.sketch("x").extra_css()
+
+
+@pytest.mark.parametrize(
+    "attack",
+    [
+        "0;position:fixed;top:0;left:0;width:100vw;height:100vh",
+        "240px;background:url(https://evil.example/x)",
+        "240px}.hui{display:none",
+        "expression(alert(1))",
+    ],
+)
+def test_sketch_size_cannot_carry_extra_css(attack):
+    """高さは CSS にそのまま入るので、長さ以外は受け付けないこと。"""
+    with pytest.raises(ValueError, match=r"長さ|高さ"):
+        ui.sketch("x", height=attack)
+
+
+def test_sketch_cannot_break_out_of_the_srcdoc_attribute():
+    """箱の中身は属性値に入る。引用符で属性を割って外に出られないこと。"""
+    widget = ui.sketch('<b title="x">" onload="alert(1)</b>', js='alert("\'")')
+    rendered = widget._repr_html_()
+    assert check_html(rendered) == []
+    # 生の " は srcdoc の中に出さない（出ると属性がそこで終わる）
+    srcdoc = re.search(r'srcdoc="([^"]*)"', rendered)
+    assert srcdoc, "srcdoc が属性として取り出せません"
+    assert "onload" not in sketch_frame(widget).replace(srcdoc.group(1), "")
+
+
+def test_sketch_does_not_fetch_anything_by_default():
+    """箱の中も、既定では外に取りに行かないこと（土台の CSS と同じ約束）。"""
+    assert "googleapis" not in ui.sketch("x", js="1").document()
+
+
+def test_ui_html_still_refuses_an_iframe_written_by_hand():
+    """``ui.sketch()`` を足しても、``ui.html()`` の iframe は断ったままにする。
+
+    sketch は sandbox を自分で付けるから通している。手書きの iframe は
+    何が付くか分からないうえ、本体のサニタイザが取り除く。
+    """
+    assert dangerous_html('<iframe sandbox="allow-scripts"></iframe>') != []
+    with pytest.raises(ValueError, match="iframe"):
+        ui.html('<iframe sandbox="allow-scripts" srcdoc="x"></iframe>')

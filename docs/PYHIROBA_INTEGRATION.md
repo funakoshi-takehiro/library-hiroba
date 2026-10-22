@@ -43,6 +43,7 @@ PyHiroba 本体は library-hiroba を同梱（vendoring）して配ります。�
 - **`ui` が使う標準ライブラリに `importlib.metadata` が入りました**（0.8.3）。`ui.form()` を出すときに「ディスク上の版」と「読み込み済みの版」を比べ、食い違っていたら画面に再起動をうながすためです。Colab で `%pip install -U` した人が、再起動していないせいで直った版が反映されない、という形に3回なりました。**同梱の PyHiroba には配布情報が無く、`PackageNotFoundError` になるので何も表示しません。**
 - **`ui.html(css=...)` が出す CSS の形が変わりました**（0.9.0）。以前は利用者の CSS 全体を `.hui-raw-XXXX { ... }` で囲む **CSS ネスト**でしたが、いまは**セレクタ一つずつに `.hui-raw-XXXX ` を前置**した、ネストを使わない平たい CSS を出します。`@media` などの中も同じように前置して出します。PyHiroba はこの CSS をページと同じ document に挿すので、形が変わったことだけお知らせします（**本体側の対応は不要です**）。
   - 変えた理由は2つです。**(1) 古い端末で効かない**：CSS ネストは Chrome 112 / Safari 16.5 より前には無く、要素名から始まるセレクタ（`p { ... }` など）は Chrome 120 / Safari 17.2 より前では読み飛ばされます。GIGA 端末の更新が止まっている学校では、囲んだ CSS が丸ごと無効になっていました。**(2) 囲みから抜け出せた**：CSS の文字列の中に `}` を書くと、囲みの括弧を閉じてしまい、ページ全体に効く CSS を書けました（`ui.html()` は教材を書く人が自分で書くものなので、生徒からの攻撃ではありませんが、教材のミスが PyHiroba の画面全体を壊す形になります）。いまは `@import` のような外に出る指定を落とし、スコープを付けられない書き方は `ValueError` にします
+- **`ui` が使う標準ライブラリに `base64` が入りました**（0.10.0）。`ui.sketch()` の中身を属性値で運ぶためです。生のままだと中の `</script>` を見て DOMPurify が**属性ごと**落とすので、その形にならない base64 にしています。あわせて `ui` 側が **Pyodide の `js`** を（関数の中で `try/except ImportError` に包んで）読むようになりました。`pyhirobaFeatures` を見て「本体が `sketch` に対応しているか」を判断するためで、Colab と素の Python では「本体の機能はひとつも無い」として扱われます
 - **`ai` は使われるまで読み込みません**。`from library_hiroba import ui` だけなら `_ai.py` は読み込まれません
 - `_ai.py` はブラウザでは `js` しか使いません。`transformers` / `torch` を読み込むのは Colab 経路に入ったときだけです
 
@@ -77,7 +78,7 @@ self.pyhirobaFeatures = 'forms,ai,ai-probe'
 
 - 読み方は「,」区切りの**完全一致**です。前後の空白は落とします
 - 名乗っていない機能は「未対応」として扱います。ただし**この変数自体が無い本体**は「名乗らない古い本体」とみなし、これまでどおり呼んでみて落ちたら諦める形に戻ります（対応済みなのに名乗っていない本体を、機能無しに落とさないため）
-- library-hiroba 側は `_ai.host_features()` / `_ai.host_supports("forms")` で読みます
+- library-hiroba 側は `_core.host_features()` / `_ai.host_supports("forms")` で読みます（0.10.0 で `_ai` から `_core` へ移しました。`ui` 側の `ui.sketch()` も同じ判断をするため）
 
 いま見ている名前は次のとおりです。
 
@@ -85,6 +86,7 @@ self.pyhirobaFeatures = 'forms,ai,ai-probe'
 |---|---|
 | `forms` | `ai.talk().form()` が注意書き無しで出ます |
 | `ai-stream` | `ai.stream()` が `ai-ask-start` / `ai-ask-next` を使います。無ければ `ai-ask` で全文を一度に返します（下記） |
+| `sketch` | `ui.sketch()`（JavaScript の動く枠）が出ます。無ければ「ここでは動きません」という注意書きになります。お願いしている内容は [`PYHIROBA_SKETCH_REQUEST.md`](PYHIROBA_SKETCH_REQUEST.md) に（**サニタイザの設定変更は要りません**） |
 
 `ai` と `ai-probe` も受け取れる形にしてありますが、いまは判断に使っていません（`ai-probe` は返事の中身で未対応が分かるためです）。将来のために名乗っていただいて構いません。
 

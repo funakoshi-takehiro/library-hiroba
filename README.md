@@ -82,6 +82,7 @@ CSS が届く範囲はそのコンポーネントの内側に限られるため�
 | バッジ | `ui.badge("重要", color="red")`（color: `blue` / `green` / `red` / `amber` / `gray`） |
 | テーブル | `ui.table([{"名前": "佐藤", "得点": 90}], caption="結果")` |
 | 自由 HTML/CSS | `ui.html('<div class="x">…</div>', css=".x { color: hotpink; }")` |
+| JavaScript | `ui.sketch('<canvas></canvas>', js="…")` |
 | 入力フォーム | `ui.form(handler, ui.field("question", label="質問"))` |
 | 考え中の表示 | `ui.thinking("考え中")`（`ui.form()` が送信中に自動で出します） |
 | 会話をためる | `ui.conversation()` に `say()`（自分）・`reply()`（相手）・`note()`（補足）で足す |
@@ -127,6 +128,33 @@ Google Colab でも同じ書体に揃えたい場合は `ui.use_web_font(True)` 
 PyHiroba は表示の直前に HTML を検査し、`<script>` `<iframe>` `<form>` などのタグ、`onclick` のようなイベント属性、`javascript:` で始まる URL を取り除きます。Google Colab にはこの検査がないため、そのまま書くと **Colab では動いて PyHiroba では動かない**、という食い違いが起きます。
 
 これを避けるため、`ui.html()` は同じものを見つけた時点で `ValueError` を出します。どちらの環境でも残る `id` や `style` は、これまでどおり自由に書けます。
+
+### JavaScript を動かす — `ui.sketch()`
+
+canvas のお絵かきやゲームのように、どうしても JavaScript が要るときは `ui.sketch()` を使います。
+
+```python
+ui.sketch('<canvas width="300" height="150"></canvas>', js="""
+const ctx = document.querySelector('canvas').getContext('2d');
+let x = 0;
+setInterval(() => {
+  ctx.clearRect(0, 0, 300, 150);
+  ctx.fillStyle = 'tomato';
+  ctx.fillRect(x = (x + 2) % 300, 50, 40, 40);
+}, 30);
+""")
+```
+
+中身は**ページから切り離した別の箱**（`sandbox` 付き iframe）に入ります。箱の中からはページの中身も cookie も見えず、ページを書き換えることもできません。ブラウザ自身が止めているので、何を書いても外には出られません。実物の Chromium で確かめた結果は [`docs/PYHIROBA_SKETCH_REQUEST.md`](docs/PYHIROBA_SKETCH_REQUEST.md) にあります。
+
+そのぶん、箱の中には次の制限があります。
+
+- **外の CSS は届きません。** 見た目は `css=` に書いてください。ページの配色（ダークテーマ）も書体も届かないので、箱の中はいつも白地です
+- **`localStorage` と cookie は使えません**（例外になります）。得点などを覚えておきたいときは Python 側で持ってください
+- **箱は中身に合わせて伸びません。** 収まらないときは `height=` を増やしてください（数で渡すと px です）
+- `alert` / `confirm` / `prompt`、`canvas`、`fetch`、`requestAnimationFrame`、`<form>` の送信は使えます
+
+**PyHiroba 本体がこの枠に対応するまで、PyHiroba では箱の代わりに「ここでは動きません」という注意書きが出ます**（黙って消えないようにしてあります）。Colab と Jupyter では今すぐ動きます。
 
 ### クイズの答えについて
 

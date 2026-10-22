@@ -71,6 +71,16 @@ def base_css() -> str:
     """いま出力すべき土台の CSS。"""
     return BASE_CSS if _use_web_font else BASE_CSS_OFFLINE
 
+
+def web_font_import() -> str:
+    """書体を取りに行く設定なら ``@import`` を返す（既定は空）。
+
+    ``ui.sketch()`` の中身は別の document なので、ページ側が読み込んだ書体が
+    届かない。``use_web_font(True)`` を呼んだときだけ、箱の中でも同じ書体に
+    なるようこれを入れる。既定で入れないのは土台の CSS と同じ理由。
+    """
+    return FONT_IMPORT if _use_web_font else ""
+
 # トークンは PyHiroba の :root / :root[data-theme="dark"] に対応する。
 # -ink 系はテキスト用に濃度を上げた派生色（ライトのサーフェス #ffffff / #fafaf8 と
 # ダークのサーフェス #191e24 / #151a20 の双方で WCAG 4.5:1 以上を確認済み）。
@@ -724,6 +734,25 @@ def _with_fallbacks(css: str) -> str:
         css,
     )
 
+
+# ui.sketch() の外枠。中身は別の document なので、ここで効くのは枠だけ。
+# 高さは部品ごとに違うので、インスタンス固有の CSS（extra_css）で足す。
+COMPONENT_CSS["sketch"] = """\
+.hui-sketch {
+  margin: 10px 0;
+  /* 高さは外枠で持つ。PyHiroba では iframe を本体の JS が後から入れるので、
+     先に場所を取っておかないと、入った瞬間に下の表示がずれる */
+  height: 240px;
+}
+.hui-sketch > iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 1px solid var(--hui-line);
+  border-radius: var(--hui-radius);
+  /* 中の document は白。読み込み中に枠だけ暗いと点滅して見えるので合わせる */
+  background: #ffffff;
+}"""
 
 COMPONENT_CSS["widgets"] = _with_fallbacks(COMPONENT_CSS["widgets"])
 

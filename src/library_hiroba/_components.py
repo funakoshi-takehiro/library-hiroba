@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import base64
 import re
 from collections.abc import Sequence
 from html.parser import HTMLParser
@@ -22,6 +23,8 @@ from ._core import (
     css_length,
     esc,
     esc_attr,
+    host_supports,
+    in_browser,
     shown,
     unique_name,
     value_html,
@@ -864,6 +867,195 @@ class RawHtml(Widget):
 
 
 # ---------------------------------------------------------------------------
+# JavaScript を動かす閉じた箱
+# ---------------------------------------------------------------------------
+# ページに直接 JS を置く道は無い。PyHiroba は出力を DOMPurify に通すので
+# ``<script>`` も ``on*`` 属性も必ず消え、さらに出力を ``innerHTML`` で挿すため、
+# 仕様上そこへ入れた ``<script>`` はそもそも実行されない（両方とも実測）。
+#
+# 残る唯一の道が、別の document に閉じ込めて**ブラウザ自身の隔離**に守らせること。
+# 実物の Chromium 1194 で測った結果が次のとおり。
+#
+#   箱の中でできること   canvas・setTimeout・requestAnimationFrame・fetch
+#   親の DOM を書き換える  SecurityError      親の変数を読む   SecurityError
+#   localStorage        SecurityError      cookie        SecurityError
+#   親を別ページへ飛ばす    SecurityError      自分の origin   null（不透明）
+#
+# **``allow-same-origin`` は足さない。** 足すと親と同じオリジンになり、上の
+# SecurityError が全部とれて、ページの乗っ取りも cookie 読みも通ってしまう。
+# 「JS を動かしたい」と「親に触らせない」を同時に満たしているのはこの一点なので、
+# ここを緩めるなら設計そのものを考え直すこと。
+#
+# 出し方は環境で2通りになる（``ui.form()`` と同じ形）。
+#
+# - Colab / Jupyter … iframe をそのまま出す。本体もサニタイザも無いので動く。
+# - PyHiroba … ``<div data-hui-sketch="…">`` だけを出し、**iframe は本体の JS が
+#   組む**。iframe をそのまま出しても消えるからで、しかも ``srcdoc`` は
+#   DOMPurify が値の中の ``</script`` を見て落とす。これはフックより手前の
+#   検査なので ``forceKeepAttr`` でも残せない（実測）。一方 ``data-*`` 属性は
+#   **設定を一切変えなくても残る**。``</script`` を含まない形にすれば通るので
+#   base64 にしている（実測で往復を確認）。
+#
+#   この形には副産物の利点がある。**sandbox の値を付けるのは本体**なので、
+#   こちら側からは緩めようがない。悪意のあるノートブックが
+#   ``allow-same-origin`` を混ぜ込むことができない。
+#
+# 逆に ``allow-modals`` と ``allow-forms`` は足してある。無いと**黙って死ぬ**から。
+#
+#   alert()   … 例外も出さずに無反応。JS でいちばん最初に書かれるのがこれ
+#   confirm() … つねに false、prompt() … つねに null
+#   <form>    … addEventListener("submit") が呼ばれない
+#
+# どれもエラーにならないので「書いたのに動かない、理由が分からない」になる。
+# このライブラリでいちばん重い「黙って間違う」そのものなので、許している。
+SKETCH_SANDBOX = "allow-scripts allow-modals allow-forms"
+
+# 本体がこの名前を名乗っていれば、閉じた箱を出してよい。
+# お願いしている内容は docs/PYHIROBA_SKETCH_REQUEST.md にある。
+SKETCH_FEATURE = "sketch"
+
+# ``<script>`` の中に ``</script>`` があると、そこで script が終わってしまう。
+# 文字列の中であっても HTML パーサは見分けないので、JS 側が途中で切れて
+# 「Invalid or unexpected token」になる（実測）。書いた時点で断る。
+_SCRIPT_CLOSE_RE = re.compile(r"</\s*script", re.IGNORECASE)
+
+# 箱の中の土台。外の CSS は別 document なので一切届かないため、ここで作り直す。
+# 数字はライブラリ本体と同じ（入力欄 16px は iOS の自動ズーム避け、44px は
+# 指で押せる大きさ）。配色は固定のライト。外が暗いときに中だけ白くなるが、
+# ページの配色（data-theme）は別 document からは読めないので揃えようがない。
+# prefers-color-scheme で中だけ暗くするのは、ライトのページに暗い箱が出る形に
+# なるため選ばない（ライブラリ全体で同じ理由からこれを使っていない）。
+_SKETCH_BASE_CSS = """\
+*, *::before, *::after { box-sizing: border-box }
+html, body { margin: 0; padding: 0 }
+body {
+  font-family: 'Zen Kaku Gothic New', system-ui, sans-serif;
+  font-size: 15px; line-height: 1.7; color: #101418; background: #ffffff;
+  padding: 12px;
+}
+canvas { display: block; max-width: 100% }
+button {
+  font: inherit; min-height: 44px; padding: 0 14px; border: 1px solid #e7e5e0;
+  border-radius: 8px; background: #ffffff; color: inherit; cursor: pointer;
+}
+input, textarea, select {
+  font: inherit; font-size: 16px; min-height: 44px; padding: 4px 10px;
+  border: 1px solid #e7e5e0; border-radius: 8px; background: #ffffff;
+}"""
+
+
+def _sketch_length(value: object, argument: str) -> str:
+    """``height=300`` のような単位なしの数も px として受ける。
+
+    ``css_length`` は単位の無い数を断る（``gap: 8`` は CSS が宣言ごと捨てるため）。
+    ただし箱の高さは px で書くのが当たり前なので、数で渡されたら px を補う。
+    """
+    if isinstance(value, bool):
+        raise ValueError(f"{argument} には高さを数か長さで指定してください（指定値: {value!r}）")
+    if isinstance(value, (int, float)):
+        value = f"{value:g}px"
+    return css_length(value, argument)
+
+
+class Sketch(Widget):
+    """JavaScript を閉じた箱（sandbox 付き iframe）の中で動かす部品。"""
+
+    css_keys = ("sketch",)
+
+    def __init__(
+        self,
+        body: object = "",
+        css: object = None,
+        js: object = None,
+        height: object = 240,
+        width: object = None,
+        title: object = "JavaScript の動く枠",
+    ):
+        self.body = "" if body is None else str(body)
+        self.js = None if js is None else str(js)
+        self.title = str(title)
+        if self.js is not None and _SCRIPT_CLOSE_RE.search(self.js):
+            raise ValueError(
+                "js の中に </script> があります。HTML のパーサはこれを文字列の中でも"
+                "見分けないため、ここで JS が切れてしまいます。"
+                '文字列の中なら "<\\/script>" のように / の前に \\ を入れてください。'
+            )
+        # 箱の中の <style> も同じ理由で途中で終わりうる。こちらは CSS の
+        # エスケープとして \/ が正しく書けるので、黙って直してよい
+        self.css = None if css is None else _STYLE_CLOSE_RE.sub(lambda _: "<\\/style", str(css))
+        self.height = _sketch_length(height, "height")
+        self.width = None if width is None else _sketch_length(width, "width")
+        # 高さは部品ごとに違うので、インスタンス固有のクラスで足す。style 属性に
+        # 入れると、許すプロパティを増やすことになる（tests/sanitize_check.py）
+        self.scope_class = unique_name("hui-sketch")
+
+    def _blocked(self) -> str | None:
+        """閉じた箱を出せない理由。出せるなら ``None``。
+
+        PyHiroba が ``sketch`` を名乗っていないあいだ、iframe は本体の
+        サニタイザで取り除かれる。黙って消えると「Colab では動いたのに」で
+        止まるので、代わりに見える形で理由を出す。
+        """
+        if in_browser() and not host_supports(SKETCH_FEATURE):
+            return (
+                "この部品（ui.sketch）は、いまお使いの PyHiroba ではまだ動きません。"
+                "JavaScript を動かす枠は本体側の対応が必要で、対応するまでは"
+                "表示の直前に取り除かれます。Colab では動くので、そちらで試せます。"
+            )
+        return None
+
+    def _iter_css_keys(self) -> list[str]:
+        # 出せないときは注意書きの見た目を使うので、その CSS も要る
+        keys = list(self.css_keys)
+        if self._blocked() is not None:
+            keys.append("alert")
+        return keys
+
+    def document(self) -> str:
+        """箱の中に入る HTML 1枚ぶん。"""
+        from ._css import web_font_import
+
+        style = "".join([web_font_import(), _SKETCH_BASE_CSS, self.css or ""])
+        script = "" if self.js is None else f"<script>\n{self.js}\n</script>"
+        return (
+            '<!doctype html><html lang="ja"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            f"<style>{style}</style></head><body>{self.body}{script}</body></html>"
+        )
+
+    def extra_css(self) -> str:
+        rules = [f".{self.scope_class} {{ height: {self.height}; }}"]
+        if self.width is not None:
+            rules.append(f".{self.scope_class} {{ width: {self.width}; }}")
+        return "\n".join(rules)
+
+    def packed(self) -> str:
+        """箱の中身を、属性値として運べる形（base64）にする。
+
+        生のままだと、中の ``</script>`` を見て DOMPurify が**属性ごと**落とす
+        （``data-*`` でも同じ。値の中身しか見ていない）。base64 ならその形に
+        ならないので、設定を変えずに通る。
+        """
+        return base64.b64encode(self.document().encode("utf-8")).decode("ascii")
+
+    def fragment(self) -> str:
+        blocked = self._blocked()
+        if blocked is not None:
+            return Alert(blocked, kind="warning", title="ここでは動きません").fragment()
+        box = f'<div class="hui-sketch {self.scope_class}"'
+        if in_browser():
+            # 本体の JS に組んでもらう（sandbox を付けるのは本体側）
+            return f'{box} data-hui-sketch="{self.packed()}"></div>'
+        return (
+            f"{box}>"
+            f'<iframe sandbox="{SKETCH_SANDBOX}"'
+            f' title="{esc_attr(self.title)}" loading="lazy"'
+            f' srcdoc="{esc_attr(self.document())}"></iframe>'
+            "</div>"
+        )
+
+
+# ---------------------------------------------------------------------------
 # 公開 API（ファクトリ関数）
 # ---------------------------------------------------------------------------
 
@@ -976,6 +1168,41 @@ def html(raw, css=None, scoped=True) -> RawHtml:
     動かない、という食い違いを防ぐため。``id`` や ``style`` は自由に書ける。
     """
     return RawHtml(raw, css=css, scoped=scoped)
+
+
+def sketch(body="", css=None, js=None, height=240, width=None, title="JavaScript の動く枠") -> Sketch:
+    """JavaScript を動かす（閉じた箱の中で）。
+
+    >>> ui.sketch('<canvas width="300" height="150"></canvas>',
+    ...           js="const c = document.querySelector('canvas').getContext('2d');"
+    ...              "c.fillStyle = 'tomato'; c.fillRect(10, 10, 120, 60);")
+
+    ``ui.html()`` は ``<script>`` を断るが、こちらは動かせる。**中身をページから
+    切り離した別の document（sandbox 付き iframe）に入れる**ためで、箱の中からは
+    ページの中身も cookie も見えず、ページを書き換えることもできない。ブラウザ側で
+    止めているので、何を書いても外には出られない。
+
+    - ``body``: 箱の中の HTML。``<canvas>`` や ``<div>`` をここに置く。
+    - ``css``: 箱の中の CSS。外の CSS は**届かない**ので、見た目はここで作る。
+    - ``js``: 箱の中で動かす JavaScript。``body`` の後に実行される。
+    - ``height`` / ``width``: 箱の大きさ（数は px）。既定は高さ 240px・幅いっぱい。
+      **箱は中身に合わせて伸びない**ので、収まらないときは高さを増やす。
+    - ``title``: 読み上げ用の名前。
+
+    使えるもの・使えないもの（実物の Chromium で確認したもの）:
+
+    - 使える … ``canvas``・``setTimeout``・``requestAnimationFrame``・``fetch``・
+      ``alert`` / ``confirm`` / ``prompt``・``<form>`` の ``submit``・``AudioContext``
+    - 使えない … ``localStorage`` / ``sessionStorage`` / ``cookie``（例外になる。
+      得点などを保存したいときは Python 側で持つ）、``window.open``、親ページの操作
+    - 届かない … ページの配色（``data-theme``）と書体。箱の中はいつも白地で、書体は
+      ``ui.use_web_font(True)`` を呼んだときだけ外と揃う
+
+    PyHiroba 本体がこの枠に対応するまで、PyHiroba では箱の代わりに
+    「ここでは動きません」という注意書きが出る（黙って消えないようにしてある）。
+    Colab と Jupyter では今すぐ動く。
+    """
+    return Sketch(body, css=css, js=js, height=height, width=width, title=title)
 
 
 def stack(*items, gap="12px") -> Stack:

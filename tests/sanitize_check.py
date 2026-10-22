@@ -16,6 +16,13 @@ from __future__ import annotations
 import re
 from html.parser import HTMLParser
 
+# ``ui.sketch()`` が出す閉じた箱の sandbox。この値ちょうどでなければ違反にする。
+# ``_components.py`` の ``SKETCH_SANDBOX`` と一致していることを
+# ``test_components.py`` で確かめている（片方だけ変えると検査が無力になる）。
+SKETCH_SANDBOX = "allow-scripts allow-modals allow-forms"
+
+# ``iframe`` はこの一覧に残してある。``ui.html()`` に利用者が書いた iframe は
+# いまも断るため。``ui.sketch()` が自分で組む1つだけを、値を確かめたうえで通す。
 FORBIDDEN_TAGS = frozenset(
     {
         "script",
@@ -97,8 +104,30 @@ class _Checker(HTMLParser):
                     f"（許しているのは {sorted(ALLOWED_STYLE_PROPS)}）"
                 )
 
+    def _check_sandboxed_frame(self, attrs) -> None:
+        """``ui.sketch()`` が出す iframe が、約束どおりの形かを見る。
+
+        閉じた箱の安全は ``sandbox`` 属性**だけ**で成り立っている。``allow-same-origin``
+        が入ると親と同じオリジンになり、ページの書き換えも cookie も通る。
+        ``src`` が入れば外部ページを読み込む。どちらも、出力を見ただけでは
+        「iframe が1つある」としか見えないので、ここで値そのものを確かめる。
+        """
+        found = dict(attrs)
+        sandbox = found.get("sandbox")
+        if sandbox is None:
+            self.violations.append("<iframe> に sandbox 属性が無い")
+        elif set((sandbox or "").split()) != set(SKETCH_SANDBOX.split()):
+            self.violations.append(
+                f"<iframe> の sandbox が約束と違う: {sandbox!r}（約束は {SKETCH_SANDBOX!r}）"
+            )
+        if found.get("src") is not None:
+            self.violations.append("<iframe> に src 属性がある（外部ページを読み込む）")
+
     def handle_starttag(self, tag: str, attrs) -> None:
-        if tag in FORBIDDEN_TAGS:
+        if tag == "iframe":
+            # ui.sketch() の閉じた箱だけは通す。ただし値を確かめたうえで
+            self._check_sandboxed_frame(attrs)
+        elif tag in FORBIDDEN_TAGS:
             self.violations.append(f"禁止タグ <{tag}> がある")
         self._check_attrs(tag, attrs)
         if tag not in VOID_TAGS:

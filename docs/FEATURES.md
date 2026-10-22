@@ -1,4 +1,4 @@
-# library-hiroba の機能一覧（0.9.2）
+# library-hiroba の機能一覧（0.10.0）
 
 **同じコードが Google Colab と PyHiroba（ブラウザの中で動く Python）の両方で動く**、
 という一点を土台にした教育向けライブラリ。入口は `ui` と `ai` の2つ。
@@ -26,6 +26,7 @@ README は「どう書くか」の案内、この文書は「何があるか」�
 | `ui.reveal(content, summary)` | 折りたたみ（`<details>`） |
 | `ui.thinking(text)` | 「考え中」の明滅 |
 | `ui.html(raw, css, scoped)` | 生の HTML ＋ その部品だけに効く CSS |
+| `ui.sketch(body, css, js, height)` | JavaScript を動かす閉じた箱（`sandbox` 付き iframe）。PyHiroba は本体の対応待ち |
 
 **値の場所に部品を入れられます。** `ui.card("結果", ui.table(scores))` のように書くと、
 中の部品が要る CSS まで一緒に出ます。

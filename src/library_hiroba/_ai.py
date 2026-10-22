@@ -33,6 +33,8 @@ from __future__ import annotations
 
 import re
 
+from ._core import host_features, in_browser
+
 __all__ = ["Ai", "ai"]
 
 
@@ -1068,40 +1070,13 @@ def check_max_tokens(max_tokens: object) -> None:
         )
 
 
-def in_browser() -> bool:
-    """PyHiroba のワーカーの中にいるか。
-
-    ``js`` が入るのは Pyodide だけで、``pyhirobaAsk`` を持つのは PyHiroba 本体だけ。
-    """
-    try:
-        import js
-    except ImportError:
-        return False
-    return hasattr(js, "pyhirobaAsk")
-
-
-def host_features() -> set[str]:
-    """本体が「対応している」と名乗っている機能の名前。
-
-    本体が ``self.pyhirobaFeatures = 'forms,ai,ai-probe'`` の形で出す文字列を
-    読む。無い版では空になる。
-
-    ``in_browser()`` では代わりにならない。あれは ``pyhirobaAsk`` があるかしか
-    答えず、**AI が動くことと、フォームが動くことは別**だから。実際、フォームが
-    使えるようになった本体でも ``in_browser()`` は真のままで、library-hiroba は
-    「PyHiroba では動きません」と出し続けていた。
-
-    名前は「,」区切りの完全一致で見る。部分一致にすると ``ai-probe`` しか
-    無いときに ``ai`` が真になってしまう。
-    """
-    try:
-        import js
-    except ImportError:
-        return set()
-    listed = getattr(js, "pyhirobaFeatures", "") or ""
-    return {name.strip() for name in str(listed).split(",") if name.strip()}
-
-
+# ``in_browser`` と ``host_features`` は ``_core`` にある。``ui`` 側の
+# ``ui.sketch()`` も同じ判断をするため、``_components`` から ``_ai`` を import
+# せずに済むよう移した（それをすると「``ai`` は使われるまで読み込まない」が崩れる）。
+#
+# ``host_supports`` だけはここに残す。1行だが、``_core`` のものを使うと
+# ``monkeypatch.setattr(_ai, "host_features", ...)`` が効かなくなり、
+# 「対応済みの本体に警告を出さない」の見張り（T1）が黙って通るようになる。
 def host_supports(feature: str) -> bool:
     """本体がその機能に対応していると名乗っているか。"""
     return feature in host_features()

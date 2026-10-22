@@ -93,6 +93,51 @@ def unique_name(prefix: str = "hui") -> str:
     return f"{prefix}-{secrets.token_hex(4)}"
 
 
+def in_browser() -> bool:
+    """PyHiroba のワーカーの中にいるか。
+
+    ``js`` が入るのは Pyodide だけで、``pyhirobaAsk`` を持つのは PyHiroba 本体だけ。
+
+    ``_ai`` ではなくここに置いてあるのは、``ui`` 側（``_components``）も
+    「本体がこの機能に対応しているか」を見る必要があるため。``_components`` から
+    ``_ai`` を import すると、``from library_hiroba import ui`` だけで ``_ai`` が
+    読み込まれ、「``ai`` は使われるまで読み込まない」という約束が崩れる
+    （``tests/test_ai.py::test_ui_stays_dependency_free`` が見張っている）。
+    """
+    try:
+        import js
+    except ImportError:
+        return False
+    return hasattr(js, "pyhirobaAsk")
+
+
+def host_features() -> set[str]:
+    """本体が「対応している」と名乗っている機能の名前。
+
+    本体が ``self.pyhirobaFeatures = 'forms,ai,ai-probe'`` の形で出す文字列を
+    読む。無い版では空になる。
+
+    ``in_browser()`` では代わりにならない。あれは ``pyhirobaAsk`` があるかしか
+    答えず、**AI が動くことと、フォームが動くことは別**だから。実際、フォームが
+    使えるようになった本体でも ``in_browser()`` は真のままで、library-hiroba は
+    「PyHiroba では動きません」と出し続けていた。
+
+    名前は「,」区切りの完全一致で見る。部分一致にすると ``ai-probe`` しか
+    無いときに ``ai`` が真になってしまう。
+    """
+    try:
+        import js
+    except ImportError:
+        return set()
+    listed = getattr(js, "pyhirobaFeatures", "") or ""
+    return {name.strip() for name in str(listed).split(",") if name.strip()}
+
+
+def host_supports(feature: str) -> bool:
+    """本体がその機能に対応していると名乗っているか。"""
+    return feature in host_features()
+
+
 def stale_module() -> str:
     """入れ替えたのに読み込み直していないとき、その旨を返す。空なら問題なし。
 
